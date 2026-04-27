@@ -1,11 +1,13 @@
-"""내일 날씨, 미세먼지, 강수 정보를 텔레그램으로 보내는 스크립트.
+"""내일 날씨, 미세먼지, 꽃가루, 강수 정보를 텔레그램으로 보내는 스크립트.
 
 GitHub Actions cron으로 매일 한 번 실행되어 PC가 꺼져 있어도 알림이 도착한다.
 필요한 환경변수:
-  OWM_API_KEY       OpenWeatherMap API 키
-  TELEGRAM_TOKEN    텔레그램 봇 토큰
-  TELEGRAM_CHAT_ID  메시지를 받을 채팅 ID
-  LAT, LON          위도/경도 (예: 37.5665, 126.9780  서울시청)
+  OWM_API_KEY        OpenWeatherMap API 키
+  TELEGRAM_TOKEN     텔레그램 봇 토큰
+  TELEGRAM_CHAT_ID   메시지를 받을 채팅 ID
+  LAT, LON           위도/경도 (예: 37.5665, 126.9780  서울시청)
+선택 환경변수:
+  TOMORROW_API_KEY   Tomorrow.io 키 (있으면 꽃가루/알레르기 지수 포함)
 """
 from __future__ import annotations
 
@@ -22,6 +24,9 @@ KST = timezone(timedelta(hours=9))
 # 참고: https://www.airkorea.or.kr (좋음/보통/나쁨/매우나쁨)
 PM25_BREAKS = [(15, "좋음"), (35, "보통"), (75, "나쁨"), (float("inf"), "매우나쁨")]
 PM10_BREAKS = [(30, "좋음"), (80, "보통"), (150, "나쁨"), (float("inf"), "매우나쁨")]
+
+# Tomorrow.io 꽃가루 지수 0~5 등급 라벨
+POLLEN_LABELS = {0: "없음", 1: "매우낮음", 2: "낮음", 3: "보통", 4: "높음", 5: "매우높음"}
 
 
 def grade(value: float, breaks: list[tuple[float, str]]) -> str:
@@ -49,6 +54,27 @@ def fetch_air_pollution(lat: str, lon: str, key: str) -> dict:
     return http_get_json(
         f"https://api.openweathermap.org/data/2.5/air_pollution/forecast?{qs}"
     )
+
+
+def fetch_pollen(lat: str, lon: str, key: str) -> dict | None:
+    """Tomorrow.io 의 일별 꽃가루 지수. 키가 없거나 호출 실패 시 None."""
+    if not key:
+        return None
+    qs = urllib.parse.urlencode(
+        {
+            "location": f"{lat},{lon}",
+            "fields": "treeIndex,grassIndex,weedIndex",
+            "timesteps": "1d",
+            "units": "metric",
+            "timezone": "Asia/Seoul",
+            "apikey": key,
+        }
+    )
+    try:
+        return http_get_json(f"https://api.tomorrow.io/v4/timelines?{qs}")
+    except Exception as exc:  # 꽃가루는 부가 정보라 실패해도 메시지 자체는 보내야 함
+        print(f"[warn] pollen fetch failed: {exc}", file=sys.stderr)
+        return None
 
 
 def tomorrow_window() -> tuple[datetime, datetime]:
@@ -104,6 +130,30 @@ def summarize_weather(slots: list[dict]) -> dict:
     }
 
 
+def summarize_pollen(payload: dict | None) -> dict:
+    """Tomorrow.io 응답에서 내일 날짜의 tree/grass/weed 지수를 뽑아낸다."""
+    if not payload:
+        return {}
+    intervals = (
+        payload.get("data", {}).get("timelines", [{}])[0].get("intervals", [])
+    )
+    start, end = tomorrow_window()
+    for iv in intervals:
+        # startTime 예: "2026-04-28T00:00:00+09:00"
+        try:
+            ts = datetime.fromisoformat(iv["startTime"]).astimezone(KST)
+        except (KeyError, ValueError):
+            continue
+        if start <= ts < end:
+            v = iv.get("values", {})
+            return {
+                "tree": int(v.get("treeIndex", 0)),
+                "grass": int(v.get("grassIndex", 0)),
+                "weed": int(v.get("weedIndex", 0)),
+            }
+    return {}
+
+
 def summarize_air(items: list[dict]) -> dict:
     if not items:
         return {}
@@ -141,7 +191,21 @@ def umbrella_advice(weather: dict) -> str:
     return "  ".join(parts)
 
 
-def build_message(weather: dict, air: dict, location_label: str) -> str:
+def pollen_line(pollen: dict) -> str | None:
+    if not pollen:
+        return None
+    items = [("나무", pollen["tree"]), ("잔디", pollen["grass"]), ("잡초", pollen["weed"])]
+    peak_name, peak_val = max(items, key=lambda x: x[1])
+    if peak_val == 0:
+        return "🌳 꽃가루: 없음"
+    parts = [f"{n} {POLLEN_LABELS.get(v, '?')}" for n, v in items if v > 0]
+    headline = "🌳 꽃가루: " + " / ".join(parts)
+    if peak_val >= 4:
+        headline += f"  ⚠️ {peak_name} 알레르기 주의"
+    return headline
+
+
+def build_message(weather: dict, air: dict, pollen: dict, location_label: str) -> str:
     start, _ = tomorrow_window()
     date_str = start.strftime("%m월 %d일 (%a)")
 
@@ -162,6 +226,10 @@ def build_message(weather: dict, air: dict, location_label: str) -> str:
         lines.append(
             f"😷 초미세먼지 PM2.5: {air['pm25_max']:.0f} µg/m³  ({air['pm25_grade']})"
         )
+
+    pollen_text = pollen_line(pollen)
+    if pollen_text:
+        lines.append(pollen_text)
 
     return "\n".join(lines)
 
@@ -189,12 +257,14 @@ def main() -> None:
     owm_key = require_env("OWM_API_KEY")
     tg_token = require_env("TELEGRAM_TOKEN")
     tg_chat = require_env("TELEGRAM_CHAT_ID")
+    pollen_key = os.environ.get("TOMORROW_API_KEY", "")
     lat = os.environ.get("LAT", "37.5665")
     lon = os.environ.get("LON", "126.9780")
     label = os.environ.get("LOCATION_LABEL", "서울")
 
     forecast = fetch_forecast(lat, lon, owm_key)
     pollution = fetch_air_pollution(lat, lon, owm_key)
+    pollen_raw = fetch_pollen(lat, lon, pollen_key)
 
     weather_slots = filter_tomorrow(forecast.get("list", []))
     if not weather_slots:
@@ -208,6 +278,7 @@ def main() -> None:
     msg = build_message(
         summarize_weather(weather_slots),
         summarize_air(air_slots),
+        summarize_pollen(pollen_raw),
         label,
     )
     send_telegram(tg_token, tg_chat, msg)

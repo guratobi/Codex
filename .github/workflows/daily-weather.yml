@@ -2,8 +2,8 @@ name: Daily Weather Notification
 
 on:
   schedule:
-    # 매일 22:00 UTC = 한국시간 익일 07:00
-    - cron: "0 22 * * *"
+    # 매일 12:00 UTC = 한국시간 21:00
+    - cron: "0 12 * * *"
   workflow_dispatch: {}  # 수동 실행 허용 (테스트용)
 
 jobs:
@@ -20,6 +20,7 @@ jobs:
       - name: Send weather notification
         env:
           OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
+          TOMORROW_API_KEY: ${{ secrets.TOMORROW_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LAT: ${{ vars.LAT || '37.5665' }}
