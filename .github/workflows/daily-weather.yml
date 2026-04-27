@@ -1,0 +1,28 @@
+name: Daily Weather Notification
+
+on:
+  schedule:
+    # 매일 22:00 UTC = 한국시간 익일 07:00
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}  # 수동 실행 허용 (테스트용)
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Send weather notification
+        env:
+          OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LAT: ${{ vars.LAT || '37.5665' }}
+          LON: ${{ vars.LON || '126.9780' }}
+          LOCATION_LABEL: ${{ vars.LOCATION_LABEL || '서울' }}
+        run: python weather_notify.py
