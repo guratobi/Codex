@@ -8,6 +8,7 @@ GitHub Actions cron으로 매일 한 번 실행되어 PC가 꺼져 있어도 알
   LAT, LON           위도/경도 (예: 37.5665, 126.9780  서울시청)
 선택 환경변수:
   TOMORROW_API_KEY   Tomorrow.io 키 (있으면 꽃가루/알레르기 지수 포함)
+  QUIET_MODE         "false" 로 두면 평범한 날에도 알림 발송 (기본: true=무음)
 """
 from __future__ import annotations
 
@@ -17,16 +18,18 @@ import urllib.parse
 import urllib.request
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 KST = timezone(timedelta(hours=9))
 
-# OpenWeatherMap Air Pollution API 의 PM2.5 / PM10 µg/m³ 한국 환경부 기준 등급
-# 참고: https://www.airkorea.or.kr (좋음/보통/나쁨/매우나쁨)
+# 한국 환경부 PM2.5 µg/m³ 등급 (좋음/보통/나쁨/매우나쁨)
 PM25_BREAKS = [(15, "좋음"), (35, "보통"), (75, "나쁨"), (float("inf"), "매우나쁨")]
-PM10_BREAKS = [(30, "좋음"), (80, "보통"), (150, "나쁨"), (float("inf"), "매우나쁨")]
 
 # Tomorrow.io 꽃가루 지수 0~5 등급 라벨
 POLLEN_LABELS = {0: "없음", 1: "매우낮음", 2: "낮음", 3: "보통", 4: "높음", 5: "매우높음"}
+
+# 어제 시점에 만든 "내일=오늘" 예보를 저장해 두고 다음날 비교에 쓴다.
+CACHE_PATH = Path(".cache/last_forecast.json")
 
 
 def grade(value: float, breaks: list[tuple[float, str]]) -> str:
@@ -94,15 +97,72 @@ def filter_tomorrow(items: list[dict], time_key: str = "dt") -> list[dict]:
     return out
 
 
+# 강수량(3h 슬롯 합계, mm) → 사람이 이해하기 쉬운 텍스트
+def rain_text(total_mm: float, slot_count: int) -> str:
+    if total_mm < 1:
+        return "약한 비"
+    avg_per_slot = total_mm / max(slot_count, 1)
+    if slot_count <= 1 and avg_per_slot >= 4:
+        return "소나기"
+    if total_mm < 5:
+        return "약한 비"
+    if total_mm < 15:
+        return "보통 비"
+    if total_mm < 30:
+        return "강한 비"
+    return "매우 강한 비"
+
+
+# 시간대 버킷: 새벽(0~6), 오전(6~12), 오후(12~18), 저녁(18~24)
+TIME_BUCKETS = [
+    (0, 6, "새벽"),
+    (6, 12, "오전"),
+    (12, 18, "오후"),
+    (18, 24, "저녁"),
+]
+
+
+def bucket_for(hour: int) -> str:
+    for lo, hi, name in TIME_BUCKETS:
+        if lo <= hour < hi:
+            return name
+    return "저녁"
+
+
+def time_of_day_flow(slots: list[dict]) -> str:
+    """3시간 슬롯들을 시간대별로 묶어 '오전 흐림 → 오후 비' 식으로 표현."""
+    buckets: dict[str, dict[str, int]] = {}
+    order: list[str] = []
+    for s in slots:
+        name = bucket_for(s["_kst"].hour)
+        if name not in buckets:
+            buckets[name] = {}
+            order.append(name)
+        desc = s["weather"][0]["description"]
+        buckets[name][desc] = buckets[name].get(desc, 0) + 1
+
+    # 각 버킷의 가장 흔한 묘사
+    sequence = [(n, max(buckets[n], key=buckets[n].get)) for n in order]
+
+    # 인접 버킷이 같은 묘사면 합쳐서 "오전·오후 흐림"
+    merged: list[tuple[list[str], str]] = []
+    for name, desc in sequence:
+        if merged and merged[-1][1] == desc:
+            merged[-1][0].append(name)
+        else:
+            merged.append(([name], desc))
+
+    if len(merged) == 1:
+        names, desc = merged[0]
+        if len(names) == len(order):
+            return f"하루 종일 {desc}"
+        return f"{'·'.join(names)} {desc}"
+    return " → ".join(f"{'·'.join(ns)} {d}" for ns, d in merged)
+
+
 def summarize_weather(slots: list[dict]) -> dict:
     """OpenWeatherMap 3시간 단위 forecast 슬롯들을 요약."""
-    temps = [s["main"]["temp"] for s in slots]
     feels = [s["main"]["feels_like"] for s in slots]
-    descriptions: dict[str, int] = {}
-    for s in slots:
-        desc = s["weather"][0]["description"]
-        descriptions[desc] = descriptions.get(desc, 0) + 1
-    main_desc = max(descriptions, key=descriptions.get) if descriptions else "정보없음"
 
     rain_slots = []
     for s in slots:
@@ -120,11 +180,9 @@ def summarize_weather(slots: list[dict]) -> dict:
             )
 
     return {
-        "t_min": min(temps) if temps else None,
-        "t_max": max(temps) if temps else None,
         "feels_min": min(feels) if feels else None,
         "feels_max": max(feels) if feels else None,
-        "main_desc": main_desc,
+        "flow": time_of_day_flow(slots) if slots else "정보없음",
         "rain_slots": rain_slots,
         "max_pop": max((s.get("pop", 0) for s in slots), default=0),
     }
@@ -157,15 +215,10 @@ def summarize_pollen(payload: dict | None) -> dict:
 def summarize_air(items: list[dict]) -> dict:
     if not items:
         return {}
-    pm25 = [it["components"]["pm2_5"] for it in items]
-    pm10 = [it["components"]["pm10"] for it in items]
-    pm25_max = max(pm25)
-    pm10_max = max(pm10)
+    pm25_max = max(it["components"]["pm2_5"] for it in items)
     return {
         "pm25_max": pm25_max,
-        "pm10_max": pm10_max,
         "pm25_grade": grade(pm25_max, PM25_BREAKS),
-        "pm10_grade": grade(pm10_max, PM10_BREAKS),
     }
 
 
@@ -184,9 +237,9 @@ def umbrella_advice(weather: dict) -> str:
     when = f"{first.strftime('%H시')}~{last.strftime('%H시')}"
     parts = ["☔ 우산 필수"]
     if total_rain:
-        parts.append(f"비 약 {total_rain:.1f}mm")
+        parts.append(rain_text(total_rain, len(rain_slots)))
     if total_snow:
-        parts.append(f"눈 약 {total_snow:.1f}mm")
+        parts.append("눈 옴")
     parts.append(f"({when})")
     return "  ".join(parts)
 
@@ -205,26 +258,44 @@ def pollen_line(pollen: dict) -> str | None:
     return headline
 
 
-def build_message(weather: dict, air: dict, pollen: dict, location_label: str) -> str:
+def diff_line(today_feels_max: float | None, tomorrow_feels_max: float) -> str | None:
+    """오늘(어제 시점에 캐시된 예보)과 내일을 비교한 한 줄."""
+    if today_feels_max is None:
+        return None
+    delta = tomorrow_feels_max - today_feels_max
+    if abs(delta) < 2:
+        return "📊 오늘과 비슷한 날씨"
+    if delta > 0:
+        return f"📈 오늘보다 {delta:.0f}°C 더 따뜻해질 듯"
+    return f"📉 오늘보다 {abs(delta):.0f}°C 더 추워질 듯"
+
+
+def build_message(
+    weather: dict,
+    air: dict,
+    pollen: dict,
+    location_label: str,
+    today_feels_max: float | None,
+) -> str:
     start, _ = tomorrow_window()
     date_str = start.strftime("%m월 %d일 (%a)")
 
     lines = [f"🗓 *내일 날씨* — {date_str}  _{location_label}_", ""]
-    lines.append(f"☁️ 하늘: {weather['main_desc']}")
-    if weather["t_min"] is not None:
+    lines.append(f"☁️ {weather['flow']}")
+    if weather["feels_min"] is not None:
         lines.append(
-            f"🌡 기온: {weather['t_min']:.0f}°C ~ {weather['t_max']:.0f}°C"
-            f"  (체감 {weather['feels_min']:.0f}°C ~ {weather['feels_max']:.0f}°C)"
+            f"🌡 체감기온: {weather['feels_min']:.0f}°C ~ {weather['feels_max']:.0f}°C"
         )
+
+    diff = diff_line(today_feels_max, weather["feels_max"]) if weather["feels_max"] is not None else None
+    if diff:
+        lines.append(diff)
 
     lines.append(umbrella_advice(weather))
 
     if air:
         lines.append(
-            f"😷 미세먼지 PM10: {air['pm10_max']:.0f} µg/m³  ({air['pm10_grade']})"
-        )
-        lines.append(
-            f"😷 초미세먼지 PM2.5: {air['pm25_max']:.0f} µg/m³  ({air['pm25_grade']})"
+            f"😷 미세먼지: {air['pm25_max']:.0f} µg/m³  ({air['pm25_grade']})"
         )
 
     pollen_text = pollen_line(pollen)
@@ -232,6 +303,49 @@ def build_message(weather: dict, air: dict, pollen: dict, location_label: str) -
         lines.append(pollen_text)
 
     return "\n".join(lines)
+
+
+def is_routine_day(weather: dict, air: dict, pollen: dict, today_feels_max: float | None) -> bool:
+    """평범한 날 = 비/눈 없음, 미세먼지 보통 이하, 꽃가루 보통 이하, 기온 변화 ±2°C."""
+    if weather["rain_slots"] or weather["max_pop"] >= 0.3:
+        return False
+    if air and air["pm25_grade"] not in ("좋음", "보통"):
+        return False
+    if pollen:
+        peak = max(pollen["tree"], pollen["grass"], pollen["weed"])
+        if peak >= 4:  # 높음 이상
+            return False
+    if today_feels_max is not None and weather["feels_max"] is not None:
+        if abs(weather["feels_max"] - today_feels_max) >= 5:
+            return False
+    return True
+
+
+def load_today_feels_max() -> float | None:
+    """어제 시점에 저장한 '내일=오늘' 예보의 체감 최고기온을 읽어온다."""
+    if not CACHE_PATH.exists():
+        return None
+    try:
+        data = json.loads(CACHE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    if data.get("for_date") != today_str:
+        # 캐시가 오래됐거나 날짜 불일치 → 비교 생략
+        return None
+    return data.get("feels_max")
+
+
+def save_tomorrow_feels_max(feels_max: float | None) -> None:
+    if feels_max is None:
+        return
+    start, _ = tomorrow_window()
+    payload = {
+        "for_date": start.strftime("%Y-%m-%d"),
+        "feels_max": feels_max,
+    }
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_PATH.write_text(json.dumps(payload))
 
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
@@ -261,6 +375,7 @@ def main() -> None:
     lat = os.environ.get("LAT", "37.5665")
     lon = os.environ.get("LON", "126.9780")
     label = os.environ.get("LOCATION_LABEL", "서울")
+    quiet_mode = os.environ.get("QUIET_MODE", "true").lower() != "false"
 
     forecast = fetch_forecast(lat, lon, owm_key)
     pollution = fetch_air_pollution(lat, lon, owm_key)
@@ -275,12 +390,19 @@ def main() -> None:
 
     air_slots = filter_tomorrow(pollution.get("list", []))
 
-    msg = build_message(
-        summarize_weather(weather_slots),
-        summarize_air(air_slots),
-        summarize_pollen(pollen_raw),
-        label,
-    )
+    weather = summarize_weather(weather_slots)
+    air = summarize_air(air_slots)
+    pollen = summarize_pollen(pollen_raw)
+    today_feels_max = load_today_feels_max()
+
+    # 다음 실행 때 비교에 쓰도록 내일 예보 캐시
+    save_tomorrow_feels_max(weather["feels_max"])
+
+    if quiet_mode and is_routine_day(weather, air, pollen, today_feels_max):
+        print("[info] 평범한 날이라 알림 생략")
+        return
+
+    msg = build_message(weather, air, pollen, label, today_feels_max)
     send_telegram(tg_token, tg_chat, msg)
     print(msg)
 
