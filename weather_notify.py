@@ -5,10 +5,11 @@ GitHub Actions cron으로 매일 한 번 실행되어 PC가 꺼져 있어도 알
   OWM_API_KEY        OpenWeatherMap API 키
   TELEGRAM_TOKEN     텔레그램 봇 토큰
   TELEGRAM_CHAT_ID   메시지를 받을 채팅 ID
-  LAT, LON           위도/경도 (예: 37.5665, 126.9780  서울시청)
 선택 환경변수:
-  TOMORROW_API_KEY   Tomorrow.io 키 (있으면 꽃가루/알레르기 지수 포함)
-  QUIET_MODE         "false" 로 두면 평범한 날에도 알림 발송 (기본: true=무음)
+  HOME_LAT/HOME_LON/HOME_LABEL   집 위치 (기본: 이문동)
+  WORK_LAT/WORK_LON/WORK_LABEL   회사 위치 (기본: 여의도). 비우면 비교 안 함
+  TOMORROW_API_KEY               Tomorrow.io 키 (있으면 꽃가루/알레르기 지수 포함)
+  QUIET_MODE                     "false" 로 두면 평범한 날에도 알림 발송 (기본: true=무음)
 """
 from __future__ import annotations
 
@@ -271,16 +272,18 @@ def diff_line(today_feels_max: float | None, tomorrow_feels_max: float) -> str |
 
 
 def build_message(
-    weather: dict,
-    air: dict,
-    pollen: dict,
-    location_label: str,
+    home: dict,
+    work: dict | None,
     today_feels_max: float | None,
 ) -> str:
     start, _ = tomorrow_window()
     date_str = start.strftime("%m월 %d일 (%a)")
 
-    lines = [f"🗓 *내일 날씨* — {date_str}  _{location_label}_", ""]
+    weather = home["weather"]
+    air = home["air"]
+    pollen = home["pollen"]
+
+    lines = [f"🗓 *내일 날씨* — {date_str}  _{home['label']}_", ""]
     lines.append(f"☁️ {weather['flow']}")
     if weather["feels_min"] is not None:
         lines.append(
@@ -302,11 +305,61 @@ def build_message(
     if pollen_text:
         lines.append(pollen_text)
 
+    if work:
+        diffs = work_diff_lines(home, work)
+        if diffs:
+            lines.append("")
+            lines.append(f"🏢 *{work['label']}* (집과 다른 점)")
+            lines.extend(diffs)
+
     return "\n".join(lines)
 
 
-def is_routine_day(weather: dict, air: dict, pollen: dict, today_feels_max: float | None) -> bool:
-    """평범한 날 = 비/눈 없음, 미세먼지 보통 이하, 꽃가루 보통 이하, 기온 변화 ±2°C."""
+def work_diff_lines(home: dict, work: dict) -> list[str]:
+    """회사 위치가 집과 의미있게 다를 때만 한두 줄 추가."""
+    out: list[str] = []
+    hw, ww = home["weather"], work["weather"]
+    ha, wa = home["air"], work["air"]
+    hp, wp = home["pollen"], work["pollen"]
+
+    # 비/눈: 한쪽만 오거나, 시간대가 크게 다를 때
+    home_rain = bool(hw["rain_slots"])
+    work_rain = bool(ww["rain_slots"])
+    if home_rain != work_rain:
+        if work_rain:
+            first = ww["rain_slots"][0]["time"]
+            last = ww["rain_slots"][-1]["time"] + timedelta(hours=3)
+            out.append(f"☔ 비 옴 ({first.strftime('%H시')}~{last.strftime('%H시')})")
+        else:
+            out.append("🌂 비 안 옴")
+
+    # 체감기온 차이가 3°C 이상
+    if hw["feels_max"] is not None and ww["feels_max"] is not None:
+        delta = ww["feels_max"] - hw["feels_max"]
+        if abs(delta) >= 3:
+            out.append(
+                f"🌡 체감 최고 {ww['feels_max']:.0f}°C "
+                f"({'+' if delta > 0 else ''}{delta:.0f}°C)"
+            )
+
+    # 미세먼지 등급이 다를 때
+    if ha and wa and ha["pm25_grade"] != wa["pm25_grade"]:
+        out.append(
+            f"😷 미세먼지: {wa['pm25_max']:.0f} µg/m³  ({wa['pm25_grade']})"
+        )
+
+    # 꽃가루 최고 등급이 한 단계 이상 다를 때
+    if hp and wp:
+        h_peak = max(hp["tree"], hp["grass"], hp["weed"])
+        w_peak = max(wp["tree"], wp["grass"], wp["weed"])
+        if abs(h_peak - w_peak) >= 1 and (h_peak >= 4 or w_peak >= 4):
+            out.append(f"🌳 꽃가루 {POLLEN_LABELS.get(w_peak, '?')}")
+
+    return out
+
+
+def is_routine_location(weather: dict, air: dict, pollen: dict, today_feels_max: float | None) -> bool:
+    """한 위치가 평범한 날인지 = 비/눈 없음, 미세먼지 보통 이하, 꽃가루 보통 이하, 기온 변화 작음."""
     if weather["rain_slots"] or weather["max_pop"] >= 0.3:
         return False
     if air and air["pm25_grade"] not in ("좋음", "보통"):
@@ -367,42 +420,65 @@ def require_env(name: str) -> str:
     return val
 
 
+def gather_location(lat: str, lon: str, label: str, owm_key: str, pollen_key: str) -> dict | None:
+    forecast = fetch_forecast(lat, lon, owm_key)
+    pollution = fetch_air_pollution(lat, lon, owm_key)
+    pollen_raw = fetch_pollen(lat, lon, pollen_key)
+    weather_slots = filter_tomorrow(forecast.get("list", []))
+    if not weather_slots:
+        return None
+    return {
+        "label": label,
+        "weather": summarize_weather(weather_slots),
+        "air": summarize_air(filter_tomorrow(pollution.get("list", []))),
+        "pollen": summarize_pollen(pollen_raw),
+    }
+
+
 def main() -> None:
     owm_key = require_env("OWM_API_KEY")
     tg_token = require_env("TELEGRAM_TOKEN")
     tg_chat = require_env("TELEGRAM_CHAT_ID")
     pollen_key = os.environ.get("TOMORROW_API_KEY", "")
-    lat = os.environ.get("LAT", "37.5665")
-    lon = os.environ.get("LON", "126.9780")
-    label = os.environ.get("LOCATION_LABEL", "서울")
     quiet_mode = os.environ.get("QUIET_MODE", "true").lower() != "false"
 
-    forecast = fetch_forecast(lat, lon, owm_key)
-    pollution = fetch_air_pollution(lat, lon, owm_key)
-    pollen_raw = fetch_pollen(lat, lon, pollen_key)
+    home_lat = os.environ.get("HOME_LAT", "37.6018")
+    home_lon = os.environ.get("HOME_LON", "127.0537")
+    home_label = os.environ.get("HOME_LABEL", "이문동")
+    work_lat = os.environ.get("WORK_LAT", "37.5218")
+    work_lon = os.environ.get("WORK_LON", "126.9244")
+    work_label = os.environ.get("WORK_LABEL", "여의도")
 
-    weather_slots = filter_tomorrow(forecast.get("list", []))
-    if not weather_slots:
-        send_telegram(
-            tg_token, tg_chat, "⚠️ 내일 예보 데이터를 가져오지 못했어요."
-        )
+    home = gather_location(home_lat, home_lon, home_label, owm_key, pollen_key)
+    if home is None:
+        send_telegram(tg_token, tg_chat, "⚠️ 내일 예보 데이터를 가져오지 못했어요.")
         return
 
-    air_slots = filter_tomorrow(pollution.get("list", []))
+    work = None
+    if work_lat and work_lon:
+        work = gather_location(work_lat, work_lon, work_label, owm_key, pollen_key)
 
-    weather = summarize_weather(weather_slots)
-    air = summarize_air(air_slots)
-    pollen = summarize_pollen(pollen_raw)
     today_feels_max = load_today_feels_max()
+    save_tomorrow_feels_max(home["weather"]["feels_max"])
 
-    # 다음 실행 때 비교에 쓰도록 내일 예보 캐시
-    save_tomorrow_feels_max(weather["feels_max"])
+    if quiet_mode:
+        home_routine = is_routine_location(
+            home["weather"], home["air"], home["pollen"], today_feels_max
+        )
+        work_routine = (
+            True
+            if work is None
+            else is_routine_location(
+                work["weather"], work["air"], work["pollen"], today_feels_max
+            )
+        )
+        # 회사 차이가 의미있게 클 때도 알림이 가게
+        work_differs = bool(work and work_diff_lines(home, work))
+        if home_routine and work_routine and not work_differs:
+            print("[info] 평범한 날이라 알림 생략")
+            return
 
-    if quiet_mode and is_routine_day(weather, air, pollen, today_feels_max):
-        print("[info] 평범한 날이라 알림 생략")
-        return
-
-    msg = build_message(weather, air, pollen, label, today_feels_max)
+    msg = build_message(home, work, today_feels_max)
     send_telegram(tg_token, tg_chat, msg)
     print(msg)
 

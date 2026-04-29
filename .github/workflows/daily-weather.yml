@@ -32,8 +32,11 @@ jobs:
           TOMORROW_API_KEY: ${{ secrets.TOMORROW_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          LAT: ${{ vars.LAT || '37.5665' }}
-          LON: ${{ vars.LON || '126.9780' }}
-          LOCATION_LABEL: ${{ vars.LOCATION_LABEL || '서울' }}
+          HOME_LAT: ${{ vars.HOME_LAT || '37.6018' }}
+          HOME_LON: ${{ vars.HOME_LON || '127.0537' }}
+          HOME_LABEL: ${{ vars.HOME_LABEL || '이문동' }}
+          WORK_LAT: ${{ vars.WORK_LAT || '37.5218' }}
+          WORK_LON: ${{ vars.WORK_LON || '126.9244' }}
+          WORK_LABEL: ${{ vars.WORK_LABEL || '여의도' }}
           QUIET_MODE: ${{ vars.QUIET_MODE || 'true' }}
         run: python weather_notify.py
