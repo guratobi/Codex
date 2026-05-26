@@ -4,7 +4,12 @@ on:
   schedule:
     # 매일 12:00 UTC = 한국시간 21:00
     - cron: "0 12 * * *"
-  workflow_dispatch: {}  # 수동 실행 허용 (테스트용)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "평범한 날에도 강제로 메시지 보내기 (테스트용)"
+        type: boolean
+        default: true
 
 jobs:
   notify:
@@ -35,5 +40,6 @@ jobs:
           HOME_LAT: ${{ vars.HOME_LAT || '37.6018' }}
           HOME_LON: ${{ vars.HOME_LON || '127.0537' }}
           HOME_LABEL: ${{ vars.HOME_LABEL || '이문동' }}
-          QUIET_MODE: ${{ vars.QUIET_MODE || 'true' }}
+          # 수동 실행 + force=true 면 무음 끄고 무조건 발송, 아니면 평소 무음 정책
+          QUIET_MODE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && 'false' || (vars.QUIET_MODE || 'true') }}
         run: python weather_notify.py
