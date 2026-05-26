@@ -1,0 +1,45 @@
+name: Daily Weather Notification
+
+on:
+  schedule:
+    # 매일 12:00 UTC = 한국시간 21:00
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "평범한 날에도 강제로 메시지 보내기 (테스트용)"
+        type: boolean
+        default: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 어제 만든 "내일=오늘" 예보 캐시 복원 (없으면 무시하고 계속)
+      - name: Restore forecast cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: weather-cache-${{ github.run_id }}
+          restore-keys: |
+            weather-cache-
+
+      - name: Send weather notification
+        env:
+          OWM_API_KEY: ${{ secrets.OWM_API_KEY }}
+          TOMORROW_API_KEY: ${{ secrets.TOMORROW_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HOME_LAT: ${{ vars.HOME_LAT || '37.6018' }}
+          HOME_LON: ${{ vars.HOME_LON || '127.0537' }}
+          HOME_LABEL: ${{ vars.HOME_LABEL || '이문동' }}
+          # 수동 실행 + force=true 면 무음 끄고 무조건 발송, 아니면 평소 무음 정책
+          QUIET_MODE: ${{ (github.event_name == 'workflow_dispatch' && inputs.force) && 'false' || (vars.QUIET_MODE || 'true') }}
+        run: python weather_notify.py
