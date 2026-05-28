@@ -286,7 +286,7 @@ function dailyWeather() { run(false); }
 // 테스트: 평범한 날이어도 강제로 즉시 발송
 function testSend() { run(true); }
 
-// 매일 21:00(KST) + 05:40(KST) 자동 실행 트리거 설치 (한 번만 실행)
+// 매일 21:00(KST) + 05:30(KST) 자동 실행 트리거 설치 (한 번만 실행)
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (tr) {
     var fn = tr.getHandlerFunction();
@@ -296,9 +296,9 @@ function setupTrigger() {
     .timeBased().everyDays(1).atHour(21)
     .inTimezone('Asia/Seoul').create();
   ScriptApp.newTrigger('morningRainCheck')
-    .timeBased().everyDays(1).atHour(5).nearMinute(40)
+    .timeBased().everyDays(1).atHour(5).nearMinute(30)
     .inTimezone('Asia/Seoul').create();
-  Logger.log('트리거 설치 완료: 매일 21:00 (내일 예보) + 매일 05:40 (비 오면 우산 리마인더)');
+  Logger.log('트리거 설치 완료: 매일 21:00 (내일 예보) + 매일 05:30 (비 오면 우산 리마인더)');
 }
 
 // 매일 아침 — 오늘 비 예보가 확실히 있을 때만 우산 리마인더 한 번 더 발송
