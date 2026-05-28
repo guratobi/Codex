@@ -296,3 +296,40 @@ function setupTrigger() {
     .inTimezone('Asia/Seoul').create();
   Logger.log('트리거 설치 완료: 매일 21:00 KST');
 }
+
+// 자기소개 메시지를 보내고 채팅에 고정한다 (한 번만 실행)
+function pinIntro() {
+  var token = prop('TELEGRAM_TOKEN');
+  var chat = prop('TELEGRAM_CHAT_ID');
+  if (!token || !chat) throw new Error('TELEGRAM_TOKEN / TELEGRAM_CHAT_ID 가 비어 있음');
+
+  var intro = [
+    '🌦 *웨더 리포트* — Weather Report',
+    '',
+    '기억은 잃었으나 하늘을 읽는 법은 남아 있다.',
+    '매일 저녁 9시, 너에게 내일의 공기를 전한다.',
+    '',
+    '비도 바람도 먼지도 — 같은 흐름의 한 조각일 뿐.',
+    '조용한 날엔 침묵하겠다. 그 또한 날씨다.'
+  ].join('\n');
+
+  var send = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post',
+    payload: { chat_id: chat, text: intro, parse_mode: 'Markdown' },
+    muteHttpExceptions: true
+  });
+  if (send.getResponseCode() >= 300) {
+    throw new Error('sendMessage 실패 — ' + send.getContentText().slice(0, 300));
+  }
+  var msgId = JSON.parse(send.getContentText()).result.message_id;
+
+  var pin = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/pinChatMessage', {
+    method: 'post',
+    payload: { chat_id: chat, message_id: msgId, disable_notification: 'true' },
+    muteHttpExceptions: true
+  });
+  if (pin.getResponseCode() >= 300) {
+    throw new Error('pinChatMessage 실패 — ' + pin.getContentText().slice(0, 300));
+  }
+  Logger.log('자기소개 전송 + 고정 완료 (message_id=' + msgId + ')');
+}
