@@ -333,3 +333,118 @@ function pinIntro() {
   }
   Logger.log('자기소개 전송 + 고정 완료 (message_id=' + msgId + ')');
 }
+
+// ============================================================
+// 인터랙티브 — 텔레그램에서 봇에게 말 걸면 즉시 응답
+// ============================================================
+
+// 텔레그램이 새 메시지를 알려줄 때 호출됨 (웹훅 엔드포인트)
+function doPost(e) {
+  try {
+    var update = JSON.parse(e.postData.contents);
+    var msg = update.message || update.edited_message;
+    if (!msg || !msg.text) return ContentService.createTextOutput('ok');
+    if (String(msg.chat.id) !== prop('TELEGRAM_CHAT_ID')) {
+      return ContentService.createTextOutput('ok'); // 다른 사람 채팅은 무시
+    }
+    handleChat(msg.text);
+  } catch (err) {
+    Logger.log('doPost error: ' + err);
+  }
+  return ContentService.createTextOutput('ok');
+}
+
+function doGet() {
+  return ContentService.createTextOutput('웨더 리포트는 깨어 있다.');
+}
+
+function handleChat(text) {
+  var t = (text || '').toLowerCase().trim();
+  if (/내일|tomorrow|tmrw|tmr/.test(t)) { run(true); return; }
+  if (/오늘|today|지금|현재|now/.test(t)) { todayReport(); return; }
+  if (/비|우산|rain|umbrella/.test(t)) { rainOnly(); return; }
+  if (/미세|먼지|공기|pm|air/.test(t)) { airOnly(); return; }
+  if (/도움|help|메뉴|menu|\?/.test(t)) {
+    sendTelegram(
+      '나에게 물을 수 있는 것:\n' +
+      '• "내일"  — 내일의 공기\n' +
+      '• "오늘"  — 오늘 남은 시간\n' +
+      '• "비"    — 비 / 우산\n' +
+      '• "미세먼지" — 대기질'
+    );
+    return;
+  }
+  sendTelegram('내가 읽는 것은 하늘뿐.\n"내일", "오늘", "비", "미세먼지" — 그 중에 답이 있다.');
+}
+
+function todayRestWindow() {
+  var nowSec = Math.floor(Date.now() / 1000);
+  var k = new Date(Date.now() + KST_MS);
+  var endMs = Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate() + 1, 0, 0, 0) - KST_MS;
+  return { startSec: nowSec, endSec: endMs / 1000 };
+}
+
+function filterWindow(list, win) {
+  return (list || []).filter(function (it) { return it.dt >= win.startSec && it.dt < win.endSec; });
+}
+
+function todayReport() {
+  var owm = prop('OWM_API_KEY');
+  if (!owm) { sendTelegram('OWM 키가 없다.'); return; }
+  var lat = prop('HOME_LAT', '37.6018');
+  var lon = prop('HOME_LON', '127.0537');
+  var label = prop('HOME_LABEL', '이문동');
+  var win = todayRestWindow();
+  var slots = filterWindow(fetchForecast(lat, lon, owm).list, win);
+  if (!slots.length) { sendTelegram('🌙 오늘은 더 이상 예보가 없다. 내일을 물으라.'); return; }
+  var w = summarizeWeather(slots);
+  var air = summarizeAir(filterWindow(fetchAir(lat, lon, owm).list, win));
+  var k = new Date(Date.now() + KST_MS);
+  var header = '🗓 *오늘 (' + WEEKDAYS[k.getUTCDay()] + ') 남은 시간* ' + label;
+  var feels = (w.feelsMin !== null) ?
+    '체감 ' + Math.round(w.feelsMin) + '~' + Math.round(w.feelsMax) + '°C' : '';
+  var lines = [header, '☁️ ' + w.flow + (feels ? ', ' + feels : '')];
+  [umbrellaLine(w), airLine(air)].forEach(function (l) { if (l) lines.push(l); });
+  sendTelegram(lines.join('\n'));
+}
+
+function rainOnly() {
+  var owm = prop('OWM_API_KEY');
+  var lat = prop('HOME_LAT', '37.6018');
+  var lon = prop('HOME_LON', '127.0537');
+  var nowSec = Math.floor(Date.now() / 1000);
+  var slots = filterWindow(fetchForecast(lat, lon, owm).list, { startSec: nowSec, endSec: nowSec + 24 * 3600 });
+  if (!slots.length) { sendTelegram('하늘이 비어 있다.'); return; }
+  var w = summarizeWeather(slots);
+  sendTelegram(umbrellaLine(w) || '🌂 앞으로 24시간 — 비는 없다.');
+}
+
+function airOnly() {
+  var owm = prop('OWM_API_KEY');
+  var lat = prop('HOME_LAT', '37.6018');
+  var lon = prop('HOME_LON', '127.0537');
+  var nowSec = Math.floor(Date.now() / 1000);
+  var slots = filterWindow(fetchAir(lat, lon, owm).list, { startSec: nowSec, endSec: nowSec + 24 * 3600 });
+  var s = summarizeAir(slots);
+  if (!s) { sendTelegram('대기 데이터가 없다.'); return; }
+  sendTelegram(airLine(s) || '😷 미세먼지 ' + s.grade + ' (' + Math.round(s.pm25Max) + ')');
+}
+
+// 웹 앱 배포한 뒤 한 번만 실행 — 텔레그램에 이 스크립트 URL을 webhook으로 등록
+function installWebhook() {
+  var url = ScriptApp.getService().getUrl();
+  if (!url) throw new Error('먼저 "배포 → 새 배포 → 웹 앱"으로 배포해야 함');
+  var token = prop('TELEGRAM_TOKEN');
+  var resp = UrlFetchApp.fetch(
+    'https://api.telegram.org/bot' + token + '/setWebhook?url=' + encodeURIComponent(url),
+    { muteHttpExceptions: true }
+  );
+  Logger.log('웹훅 설정 URL: ' + url);
+  Logger.log('응답: ' + resp.getContentText());
+}
+
+function removeWebhook() {
+  var token = prop('TELEGRAM_TOKEN');
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/deleteWebhook', { muteHttpExceptions: true });
+  Logger.log('웹훅 제거 응답: ' + r.getContentText());
+}
