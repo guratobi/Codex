@@ -365,8 +365,14 @@ function pinIntro() {
 
 // 텔레그램이 새 메시지를 알려줄 때 호출됨 (웹훅 엔드포인트)
 function doPost(e) {
+  var cache = CacheService.getScriptCache();
   try {
     var update = JSON.parse(e.postData.contents);
+    // 텔레그램은 응답이 늦으면 같은 update_id로 재시도함. 이미 본 건 즉시 OK.
+    var key = 'u_' + update.update_id;
+    if (cache.get(key)) return ContentService.createTextOutput('ok');
+    cache.put(key, '1', 600); // 10분간 처리 완료로 기억
+
     var msg = update.message || update.edited_message;
     if (!msg || !msg.text) return ContentService.createTextOutput('ok');
     if (String(msg.chat.id) !== prop('TELEGRAM_CHAT_ID')) {
