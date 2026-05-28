@@ -286,15 +286,40 @@ function dailyWeather() { run(false); }
 // 테스트: 평범한 날이어도 강제로 즉시 발송
 function testSend() { run(true); }
 
-// 매일 21:00(KST) 자동 실행 트리거 설치 (한 번만 실행)
+// 매일 21:00(KST) + 05:40(KST) 자동 실행 트리거 설치 (한 번만 실행)
 function setupTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (tr) {
-    if (tr.getHandlerFunction() === 'dailyWeather') ScriptApp.deleteTrigger(tr);
+    var fn = tr.getHandlerFunction();
+    if (fn === 'dailyWeather' || fn === 'morningRainCheck') ScriptApp.deleteTrigger(tr);
   });
   ScriptApp.newTrigger('dailyWeather')
-    .timeBased().atHour(21).everyDays(1)
+    .timeBased().everyDays(1).atHour(21)
     .inTimezone('Asia/Seoul').create();
-  Logger.log('트리거 설치 완료: 매일 21:00 KST');
+  ScriptApp.newTrigger('morningRainCheck')
+    .timeBased().everyDays(1).atHour(5).nearMinute(40)
+    .inTimezone('Asia/Seoul').create();
+  Logger.log('트리거 설치 완료: 매일 21:00 (내일 예보) + 매일 05:40 (비 오면 우산 리마인더)');
+}
+
+// 매일 아침 — 오늘 비 예보가 확실히 있을 때만 우산 리마인더 한 번 더 발송
+function morningRainCheck() {
+  var owm = prop('OWM_API_KEY');
+  if (!owm) return;
+  var lat = prop('HOME_LAT', '37.6018');
+  var lon = prop('HOME_LON', '127.0537');
+  var win = todayRestWindow();
+  var slots = filterWindow(fetchForecast(lat, lon, owm).list, win);
+  var w = summarizeWeather(slots);
+  if (!w.rainSlots.length) {
+    Logger.log('아침 우산 알림 생략 — 비 예보 없음');
+    return;
+  }
+  sendTelegram('☔️☔️☔️우산 잊지 않으셨죠?');
+}
+
+// 테스트용 — 비 여부 상관없이 강제로 아침 리마인더 발송
+function testMorning() {
+  sendTelegram('☔️☔️☔️우산 잊지 않으셨죠?');
 }
 
 // 자기소개 메시지를 보내고 채팅에 고정한다 (한 번만 실행)
