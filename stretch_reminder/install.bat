@@ -59,6 +59,20 @@ echo  [완료] 시작프로그램에 등록되었습니다.
 echo         %LNK%
 echo.
 
+rem ----- (선택) 시스템 트레이 아이콘용 패키지 설치 -----
+rem        실패해도 본체는 트레이 없이 정상 동작한다.
+echo  시스템 트레이 아이콘용 패키지(pystray, pillow) 설치를 시도합니다...
+set "PY="
+for /f "delims=" %%I in ('where python.exe 2^>nul') do if not defined PY set "PY=%%I"
+if not defined PY set "PY=%PYW%"
+"%PY%" -m pip install --user --quiet --disable-pip-version-check pystray pillow
+if errorlevel 1 (
+    echo  [참고] 트레이 패키지 설치 실패 ^(인터넷 미연결 등^). 트레이 없이도 동작합니다.
+) else (
+    echo  [완료] 트레이 아이콘 사용 준비됨.
+)
+echo.
+
 rem ----- 지금 바로 한 번 실행 (이미 실행 중이면 중복 안 됨) -----
 echo  지금 바로 백그라운드에서 실행합니다...
 start "" "%PYW%" "%SCRIPT%"

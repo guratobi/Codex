@@ -4,20 +4,34 @@
 - 평소엔 창 없이 백그라운드에서 대기 (작업표시줄에 안 보임)
 - 설정한 주기마다 모든 창보다 앞에 전체화면 알림이 뜸
 - '완료' 또는 '미루기(5/10/15분)' 버튼 제공
+- 시스템 트레이(작업표시줄 우측 알림 영역) 아이콘으로 제어
+  · 우클릭 메뉴: 지금 스트레칭 / 일시정지·재개 / 종료
+  · (pystray·Pillow 설치 시. 없으면 트레이 없이도 정상 동작)
 - pythonw.exe(.pyw)로 실행하면 콘솔 창도 안 뜸
 - 같은 PC에서 두 번 실행해도 중복으로 뜨지 않음 (단일 인스턴스 보장)
 
 설정값은 아래 CONFIG에서 바꾸세요.
 
 끄고 싶을 때:
+  · 트레이 아이콘 우클릭 → 종료
   · 알림창에서  Ctrl+Q  누르거나 우측 '종료' 버튼 클릭
   · 또는 작업 관리자(Ctrl+Shift+Esc)에서 pythonw.exe 종료
 """
 
+import queue
 import socket
 import sys
+import threading
 import time
 import tkinter as tk
+
+# 트레이 아이콘은 선택 기능. 패키지가 없으면 트레이 없이 동작한다.
+try:
+    import pystray
+    from PIL import Image, ImageDraw
+    TRAY_AVAILABLE = True
+except Exception:
+    TRAY_AVAILABLE = False
 
 # ===================== 설정 =====================
 CONFIG = {
@@ -92,21 +106,71 @@ class StretchReminder:
         self.root = tk.Tk()
         self.root.withdraw()  # 시작 시 창 숨김 (백그라운드)
         self.alarm_window = None
+        self.paused = False
+        self._remaining_when_paused = None
+        self.tray = None
+        # 트레이 스레드 → 메인 스레드로 명령을 넘기는 큐 (스레드 안전)
+        self.commands = queue.Queue()
+
         self.next_seconds = max(1, int(CONFIG["interval_min"] * 60))
         self._schedule()
-        # 타이머: 별도 스레드 대신 메인 스레드에서 after 로 폴링한다.
+
+        # 타이머/명령처리 모두 메인 스레드에서 after 로 폴링한다.
         # (tkinter 객체는 메인 스레드에서만 안전하게 다룰 수 있음)
         self.root.after(1000, self._tick)
+        self.root.after(200, self._poll_commands)
 
+        if TRAY_AVAILABLE:
+            try:
+                self._start_tray()
+            except Exception:
+                self.tray = None  # 트레이 실패해도 본체는 계속 동작
+
+    # ---------- 타이머 ----------
     def _schedule(self):
         self.target_time = time.time() + self.next_seconds
 
     def _tick(self):
         # 절전/최대절전에서 깨어나 시각이 한참 지나 있어도 그때 한 번만 뜬다.
-        if self.alarm_window is None and time.time() >= self.target_time:
+        if (not self.paused and self.alarm_window is None
+                and time.time() >= self.target_time):
             self.show_alarm()
         self.root.after(1000, self._tick)
 
+    def _set_paused(self, paused):
+        if paused == self.paused:
+            return
+        self.paused = paused
+        if paused:
+            # 남은 시간을 기억해 두고 멈춘다.
+            self._remaining_when_paused = max(0.0, self.target_time - time.time())
+        else:
+            # 재개: 멈췄던 시점의 남은 시간만큼 다시 카운트.
+            remaining = self._remaining_when_paused
+            if remaining is None:
+                remaining = self.next_seconds
+            self.target_time = time.time() + remaining
+            self._remaining_when_paused = None
+        self._refresh_tray_menu()
+
+    # ---------- 트레이에서 온 명령 처리 (메인 스레드) ----------
+    def _poll_commands(self):
+        try:
+            while True:
+                self._handle_command(self.commands.get_nowait())
+        except queue.Empty:
+            pass
+        self.root.after(200, self._poll_commands)
+
+    def _handle_command(self, cmd):
+        if cmd == "stretch_now":
+            self.show_alarm()
+        elif cmd == "toggle_pause":
+            self._set_paused(not self.paused)
+        elif cmd == "quit":
+            self.quit_app()
+
+    # ---------- 알림 창 ----------
     def show_alarm(self):
         if self.alarm_window is not None:
             return
@@ -211,7 +275,68 @@ class StretchReminder:
         if self.alarm_window is not None:
             self.alarm_window.destroy()
             self.alarm_window = None
+        if self.tray is not None:
+            try:
+                self.tray.stop()
+            except Exception:
+                pass
+            self.tray = None
         self.root.destroy()
+
+    # ---------- 시스템 트레이 ----------
+    def _make_icon_image(self, size=64):
+        """트레이 아이콘 이미지(스트레칭하는 사람 형상)를 코드로 그린다."""
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        d.ellipse([4, 4, size - 4, size - 4], fill=ACCENT)  # 강조색 원
+
+        cx = size // 2
+        white = "#0a1410"  # 원 위에 올라갈 진한 색 (대비)
+        lw = max(3, size // 16)
+        # 머리
+        hr = size // 10
+        d.ellipse([cx - hr, 14, cx + hr, 14 + 2 * hr], fill=white)
+        # 몸통
+        d.line([(cx, 14 + 2 * hr), (cx, size - 20)], fill=white, width=lw)
+        # 양팔(위로 뻗은 스트레칭 자세)
+        d.line([(cx, 30), (cx - 14, 18)], fill=white, width=lw)
+        d.line([(cx, 30), (cx + 14, 18)], fill=white, width=lw)
+        # 양다리
+        d.line([(cx, size - 20), (cx - 11, size - 8)], fill=white, width=lw)
+        d.line([(cx, size - 20), (cx + 11, size - 8)], fill=white, width=lw)
+        return img
+
+    def _build_tray(self):
+        """pystray 아이콘 객체를 만든다(스레드 실행 전 단계, 테스트 용이)."""
+        menu = pystray.Menu(
+            pystray.MenuItem(
+                "지금 스트레칭",
+                lambda *a: self.commands.put("stretch_now"),
+                default=True,
+            ),
+            pystray.MenuItem(
+                lambda item: "재개" if self.paused else "일시정지",
+                lambda *a: self.commands.put("toggle_pause"),
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("종료", lambda *a: self.commands.put("quit")),
+        )
+        return pystray.Icon(
+            "stretch_reminder", self._make_icon_image(), "스트레칭 알리미", menu
+        )
+
+    def _start_tray(self):
+        self.tray = self._build_tray()
+        # pystray 는 자체 메시지 루프가 필요해 별도 스레드에서 돌린다.
+        # 단, 메뉴 콜백은 큐에 문자열만 넣으므로 tkinter 를 건드리지 않는다.
+        threading.Thread(target=self.tray.run, name="tray", daemon=True).start()
+
+    def _refresh_tray_menu(self):
+        if self.tray is not None:
+            try:
+                self.tray.update_menu()
+            except Exception:
+                pass
 
     def run(self):
         self.root.mainloop()
