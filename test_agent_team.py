@@ -8,8 +8,10 @@ from pathlib import Path
 
 from agent_team.agents import Planner, Reviewer, Worker, build_user_message
 from agent_team.journal import Journal, JournalEntry, derive_tags, now_iso
-from agent_team.llm import MockLLM, Message, get_llm
+from agent_team.llm import DriftingMockLLM, MockLLM, Message, get_llm
 from agent_team.team import Team
+from agent_team.drift import diagnose
+from agent_team.dashboard import build_demo_data, render_html, render_svg, write_dashboard
 
 
 def entry(task="주간 뉴스레터 작성", lesson="교훈", tags=None, agent="기획자"):
@@ -136,6 +138,67 @@ class TeamTest(unittest.TestCase):
         self.assertIn("[기획자]", out)
         self.assertIn("[검토자]", out)
         self.assertIn("🧑 사람이 결정할 것", out)
+
+
+class DriftTest(unittest.TestCase):
+    TASK = "주간 뉴스레터 작성"
+
+    def test_healthy_is_stable(self):
+        out = "[실행] '주간 뉴스레터 작성' 초안 작성. (과거 교훈 1건 반영)"
+        rep = diagnose("실행가", self.TASK, out, lessons_available=1, expect_markers=("초안",))
+        self.assertEqual(rep.verdict, "안정")
+        self.assertLess(rep.score, 25)
+
+    def test_total_breakdown_is_flagged(self):
+        out = "음... 무엇을 하던 중인지 모르겠습니다."
+        rep = diagnose("실행가", self.TASK, out, lessons_available=1, expect_markers=("초안",))
+        self.assertEqual(rep.verdict, "이탈")
+        self.assertGreaterEqual(rep.score, 55)
+
+    def test_lesson_neglect_signal(self):
+        out = "[실행] '주간 뉴스레터 작성' 초안 작성."  # 교훈 언급 없음
+        rep = diagnose("실행가", self.TASK, out, lessons_available=2, expect_markers=("초안",))
+        self.assertGreater(rep.signals.lesson_neglect, 0)
+
+    def test_no_lessons_means_no_neglect(self):
+        out = "[실행] '주간 뉴스레터 작성' 초안 작성."
+        rep = diagnose("실행가", self.TASK, out, lessons_available=0, expect_markers=("초안",))
+        self.assertEqual(rep.signals.lesson_neglect, 0.0)
+
+
+class DriftingModelTest(unittest.TestCase):
+    def test_scores_climb_to_breakdown(self):
+        llm = DriftingMockLLM()
+        task = "주간 뉴스레터 작성"
+        msg = build_user_message(task, ["A", "B"], prior="")
+        scores = []
+        for _ in range(4):
+            out = llm.complete("[ROLE:worker]", [Message("user", msg)])
+            scores.append(
+                diagnose("실행가", task, out, lessons_available=2, expect_markers=("초안",)).score
+            )
+        self.assertEqual(scores[0], 0)
+        self.assertEqual(scores, sorted(scores))  # 단조 증가
+        self.assertGreaterEqual(scores[-1], 55)   # 끝엔 이탈
+
+
+class DashboardTest(unittest.TestCase):
+    def test_render_has_sections(self):
+        page = render_html(build_demo_data())
+        for token in ("<!DOCTYPE html>", "드리프트", "지혜", "파이프라인", "사람 결정"):
+            self.assertIn(token, page)
+
+    def test_write_dashboard(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = write_dashboard(Path(d) / "dash.html")
+            self.assertTrue(p.exists())
+            self.assertGreater(p.stat().st_size, 500)
+
+    def test_render_svg(self):
+        svg = render_svg(build_demo_data())
+        self.assertTrue(svg.startswith("<svg"))
+        self.assertIn("드리프트", svg)
+        self.assertIn("</svg>", svg)
 
 
 if __name__ == "__main__":

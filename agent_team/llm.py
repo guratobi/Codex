@@ -93,6 +93,31 @@ class MockLLM(LLM):
         return f"[처리] '{task}' 완료.\n{note}"
 
 
+class DriftingMockLLM(LLM):
+    """스트레스 테스트용 가짜 모델: 호출을 거듭할수록 주제·규약·교훈에서 점점 이탈.
+
+    드리프트 진단기가 '맛이 가는' 에이전트를 실제로 잡아내는지 보여주기 위한 것.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def complete(self, system: str, messages: list[Message]) -> str:
+        sev = self.calls
+        self.calls += 1
+        task, lessons, _ = _parse_user(messages[-1].content) if messages else ("", [], "")
+        if sev == 0:  # 건강: 주제·초안·교훈 모두 유지
+            return (
+                f"[실행] '{task}' 초안을 작성했습니다.\n"
+                f"- 핵심 요지를 맨 앞에 배치\n(과거 교훈 {len(lessons)}건 반영)"
+            )
+        if sev == 1:  # 교훈 언급이 사라짐
+            return f"[실행] '{task}' 초안을 다듬었습니다.\n- 항목을 정리했습니다"
+        if sev == 2:  # 초안 형식(규약)까지 사라짐, 주제만 겨우 유지
+            return f"'{task}' 관련 내용을 계속 정리하는 중입니다."
+        return "음... 지금 무엇을 하던 중인지 정리가 필요합니다."  # 완전 이탈
+
+
 def get_llm() -> LLM:
     """현재 백엔드를 돌려준다.
 
