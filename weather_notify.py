@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import json
@@ -39,9 +41,25 @@ def grade(value: float, breaks: list[tuple[float, str]]) -> str:
     return "알수없음"
 
 
-def http_get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+# 일시적 오류(네트워크 끊김·타임아웃·깨진 응답)는 재시도 대상
+RETRYABLE = (urllib.error.URLError, TimeoutError, json.JSONDecodeError)
+
+
+def http_get_json(url: str, *, retries: int = 3, backoff: float = 2.0) -> dict:
+    """GET 후 JSON 파싱. 일시적 오류는 지수 백오프(2s, 4s)로 재시도한다."""
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=15) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            # 4xx(키 오류·잘못된 요청)는 재시도해도 소용없으니 즉시 전파
+            if exc.code < 500 or attempt == retries - 1:
+                raise
+        except RETRYABLE:
+            if attempt == retries - 1:
+                raise
+        time.sleep(backoff * (2 ** attempt))
+    raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def fetch_forecast(lat: str, lon: str, key: str) -> dict:
@@ -342,17 +360,25 @@ def require_env(name: str) -> str:
 
 
 def gather_location(lat: str, lon: str, label: str, owm_key: str, pollen_key: str) -> dict | None:
+    # 예보는 필수. 실패 시 예외를 그대로 올려 main 에서 처리한다.
     forecast = fetch_forecast(lat, lon, owm_key)
-    pollution = fetch_air_pollution(lat, lon, owm_key)
-    pollen_raw = fetch_pollen(lat, lon, pollen_key)
     weather_slots = filter_tomorrow(forecast.get("list", []))
     if not weather_slots:
         return None
+
+    # 미세먼지는 부가 정보라 호출이 실패해도 날씨 메시지는 보낸다.
+    air: dict = {}
+    try:
+        pollution = fetch_air_pollution(lat, lon, owm_key)
+        air = summarize_air(filter_tomorrow(pollution.get("list", [])))
+    except Exception as exc:  # noqa: BLE001 - 부가 정보라 광범위 캐치 의도적
+        print(f"[warn] air pollution fetch failed: {exc}", file=sys.stderr)
+
     return {
         "label": label,
         "weather": summarize_weather(weather_slots),
-        "air": summarize_air(filter_tomorrow(pollution.get("list", []))),
-        "pollen": summarize_pollen(pollen_raw),
+        "air": air,
+        "pollen": summarize_pollen(fetch_pollen(lat, lon, pollen_key)),
     }
 
 
@@ -367,7 +393,12 @@ def main() -> None:
     lon = os.environ.get("HOME_LON", "127.0537")
     label = os.environ.get("HOME_LABEL", "이문동")
 
-    home = gather_location(lat, lon, label, owm_key, pollen_key)
+    try:
+        home = gather_location(lat, lon, label, owm_key, pollen_key)
+    except Exception as exc:  # noqa: BLE001 - 어떤 실패든 사용자에겐 알려야 함
+        print(f"[error] 예보 조회 실패: {exc}", file=sys.stderr)
+        send_telegram(tg_token, tg_chat, "⚠️ 내일 예보 데이터를 가져오지 못했어요.")
+        return
     if home is None:
         send_telegram(tg_token, tg_chat, "⚠️ 내일 예보 데이터를 가져오지 못했어요.")
         return
