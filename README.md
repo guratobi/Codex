@@ -68,3 +68,15 @@ test_weather_notify.py       # 단위 테스트 (의존성 없음)
   daily-weather.yml          # 매일 21시 알림 cron
   test.yml                   # push/PR 시 테스트 실행
 ```
+
+---
+
+## 실험: AI 에이전트 팀 + 자기학습 일지
+
+`agent_team/` 에 별도 프로토타입이 있습니다 → [agent_team/README.md](agent_team/README.md)
+
+기획·실행·검토 에이전트가 팀으로 협업하고, 작업 경험을 일기로 남겨 다음 작업에 회상·재사용합니다(영상의 "스스로 지혜를 쌓는 구조"). 키 없이 도는 데모:
+
+```bash
+python -m agent_team.demo
+```
