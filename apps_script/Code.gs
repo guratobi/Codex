@@ -217,11 +217,48 @@ function isRoutineDay(w, air, pollen, todayMax) {
   return true;
 }
 
+// 메시지 맨 위에 붙는 캐릭터 톤의 "왜 이 알림이 왔는지" 도입부.
+// 해당하는 조건이 여러 개면 각각 별도 줄로 나열한다.
+function leadLines(w, air, pollen, todayMax) {
+  var out = [];
+  var totalRain = w.rainSlots.reduce(function (a, s) { return a + s.rain; }, 0);
+  var totalSnow = w.rainSlots.reduce(function (a, s) { return a + s.snow; }, 0);
+
+  if (totalSnow > 0) out.push('❄️❄️ 흰 침묵이 내려온다. ❄️❄️');
+  if (totalRain >= 15) {
+    out.push('☔☔☔ 하늘이 거칠다. 만반의 준비를. ☔☔☔');
+  } else if (totalRain > 0 || (w.rainSlots.length > 0 && totalSnow === 0)) {
+    out.push('☔☔ 하늘이 운다. 우산을 챙겨라. ☔☔');
+  }
+
+  if (air) {
+    if (air.grade === '매우나쁨') out.push('😷😷 탁함이 극에 달했다. 마스크를 잊지 마라. 😷😷');
+    else if (air.grade === '나쁨') out.push('😷 보이지 않는 먼지가 무겁다. 😷');
+  }
+
+  if (pollen && Math.max(pollen.tree, pollen.grass, pollen.weed) >= 4) {
+    out.push('🌳🌳 꽃가루 알레르기를 경계하라. 🌳🌳');
+  }
+
+  if (todayMax !== null && todayMax !== undefined && w.feelsMax !== null) {
+    var delta = w.feelsMax - todayMax;
+    if (delta <= -5) out.push('📉 갑자기 추워지리라. 📉');
+    else if (delta >= 5) out.push('📈 갑자기 더워지리라. 📈');
+  }
+
+  return out;
+}
+
 function buildMessage(w, air, pollen, label, todayMax) {
   var t = tomorrowWindow();
   var k = new Date(t.startMs + KST_MS);
   var dateStr = (k.getUTCMonth() + 1) + '/' + k.getUTCDate() + ' (' + WEEKDAYS[k.getUTCDay()] + ')';
-  var lines = ['🗓 *' + dateStr + '* ' + label];
+
+  var leads = leadLines(w, air, pollen, todayMax);
+  var lines = leads.slice(); // shallow copy
+  if (leads.length) lines.push(''); // 도입부와 본문 사이 빈 줄
+
+  lines.push('🗓 *' + dateStr + '* ' + label);
   var feels = (w.feelsMin !== null) ?
     '체감 ' + Math.round(w.feelsMin) + '~' + Math.round(w.feelsMax) + '°C' : '';
   lines.push(('☁️ ' + w.flow + (feels ? ', ' + feels : '')));
@@ -314,12 +351,12 @@ function morningRainCheck() {
     Logger.log('아침 우산 알림 생략 — 비 예보 없음');
     return;
   }
-  sendTelegram('☔️☔️☔️우산 잊지 않으셨죠?');
+  sendTelegram('☔️☔️☔️ 우산, 잊지 말 것. ☔️☔️☔️');
 }
 
 // 테스트용 — 비 여부 상관없이 강제로 아침 리마인더 발송
 function testMorning() {
-  sendTelegram('☔️☔️☔️우산 잊지 않으셨죠?');
+  sendTelegram('☔️☔️☔️ 우산, 잊지 말 것. ☔️☔️☔️');
 }
 
 // 자기소개 메시지를 보내고 채팅에 고정한다 (한 번만 실행)
