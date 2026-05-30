@@ -127,7 +127,7 @@ class SceneTest(unittest.TestCase):
         self.assertIn("<!doctype html>", page)
         self.assertIn("art.png", page)
         self.assertIn("운명이 말하다", page)
-        self.assertIn(r.synthesis[:12], page)  # 실제 종합이 박스에 들어감
+        self.assertIn("되돌릴 수 있는가", page)  # 실제 종합이 박스에 들어감 (HTML 이스케이프 무관 구간)
 
     def test_write_council_html(self):
         with tempfile.TemporaryDirectory() as d:
