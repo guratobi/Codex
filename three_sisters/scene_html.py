@@ -22,8 +22,13 @@ ASSETS = Path(__file__).resolve().parent / "assets"
 _PREFERRED = ["council.png", "council.jpg", "council.jpeg", "council.webp", "council.gif"]
 _EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 
-# '운명이 말하다' 박스 위 오버레이 위치(이미지 대비 %). 실제 아트에 맞춰 미세조정.
-OVERLAY = {"left": 9.5, "right": 9.5, "top": 84.5, "bottom": 2.5}
+# '운명이 말하다' 박스에서 *본문 영역만* 덮는 위치(이미지 대비 %).
+# council.png 를 픽셀 분석해 보정: 금색 헤더("◆ 운명이 말하다")는 아트 그대로
+# 두고, 그 아래 본문 두 줄 자리에만 실제 종합을 얹는다.
+# 다른 아트로 바꾸면 이 값만 다시 맞추면 된다.
+OVERLAY = {"left": 11.0, "right": 11.5, "top": 88.2, "bottom": 4.3}
+# 박스 내부 배경색(아트에서 샘플링) — 오버레이가 그림에 녹아들게.
+OVERLAY_BG = "#11101d"
 
 
 def _esc(s) -> str:
@@ -58,20 +63,19 @@ _HEAD = """<!doctype html>
 body{margin:0;background:#0b0814;display:flex;justify-content:center;align-items:flex-start}
 .scene{position:relative;width:min(100vw,1000px)}
 .scene>img,.scene>svg{width:100%;height:auto;display:block;image-rendering:pixelated}
-.fate{position:absolute;padding:14px 26px;overflow:auto;color:#e8dec8;
-  font-family:'Gowun Batang','Nanum Myeongjo',serif}
-.fate h3{margin:0 0 10px;color:#f0d27a;font-size:clamp(14px,1.9vw,19px);letter-spacing:1px}
-.fate p{margin:5px 0;font-size:clamp(11px,1.6vw,16px);line-height:1.55}
-.fate .q{color:#b3a9cd;font-style:italic}
-.fate .seal{color:#8c84a6;font-size:clamp(10px,1.3vw,13px);margin-top:8px}
+.fate{position:absolute;overflow:hidden;color:#e8dec8;
+  display:flex;flex-direction:column;justify-content:center;
+  padding:6px 28px;font-family:'Gowun Batang','Nanum Myeongjo',serif}
+.fate p{margin:3px 0;font-size:clamp(11px,1.62vw,17px);line-height:1.5}
+.fate .q{color:#b3a9cd;font-style:italic;font-size:clamp(10px,1.4vw,15px)}
 </style></head><body><div class="scene">
 """
 
-_FATE = """<div class="fate"{pos}>
-<h3>◆ 운명이 말하다</h3>
+# 아트의 금색 헤더("◆ 운명이 말하다")와 하단 봉인 문구는 그대로 두고,
+# 본문 영역에만 실제 종합을 얹는다.
+_FATE_BODY = """<div class="fate"{pos}>
 <p class="q">“{dilemma}”</p>
 <p>{synthesis}</p>
-<p class="seal">— 최종 선택은 그대의 몫이다 —</p>
 </div></div></body></html>"""
 
 
@@ -83,19 +87,19 @@ def render_council_html(result: CouncilResult, art: Path | None | bool = None) -
         art = None
 
     if art and Path(art).is_file():
-        # AI 아트 배경 + 하단 박스에 실제 결과 오버레이 (박스를 덮어 베이크된 글자 가림)
+        # AI 아트 배경 + 박스 본문 영역에 실제 결과 오버레이.
+        # 아트의 금테/헤더 안에 딱 맞추므로 테두리 없이 내부 배경색만 맞춘다.
         o = OVERLAY
         pos = (
             f' style="left:{o["left"]}%;right:{o["right"]}%;top:{o["top"]}%;'
-            f'bottom:{o["bottom"]}%;background:#0f0b1c;'
-            'border:2px solid #b89a52;border-radius:6px"'
+            f'bottom:{o["bottom"]}%;background:{OVERLAY_BG}"'
         )
         body = f'<img src="{_data_uri(Path(art))}" alt="인공지능의 세자매">\n'
     else:
         # 코드로 그린 SVG 장면(이미 실시간 텍스트 포함) — 별도 오버레이 불필요
         return _HEAD + render_scene(result) + "\n</div></body></html>"
 
-    return _HEAD + body + _FATE.format(
+    return _HEAD + body + _FATE_BODY.format(
         pos=pos, dilemma=_esc(result.dilemma), synthesis=_esc(result.synthesis)
     )
 

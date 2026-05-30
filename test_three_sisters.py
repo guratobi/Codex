@@ -132,14 +132,15 @@ class SceneTest(unittest.TestCase):
         self.assertIn("되돌릴 수 있는가", page)
 
     def test_html_uses_art_when_present(self):
-        # 가짜 이미지 파일을 주면 base64 임베드 + 오버레이 박스
+        # 가짜 이미지 파일을 주면 base64 임베드 + 본문 오버레이(헤더는 아트에 베이크됨)
         with tempfile.TemporaryDirectory() as d:
             art = Path(d) / "council.png"
             art.write_bytes(b"\x89PNG\r\n\x1a\n fake png bytes")
             page = render_council_html(_sample_result(), art=art)
             self.assertIn("data:image/png;base64,", page)
-            self.assertIn("운명이 말하다", page)
-            self.assertIn("되돌릴 수 있는가", page)  # 실제 종합이 박스에
+            self.assertIn('class="fate"', page)             # 오버레이 박스 존재
+            self.assertIn("되돌릴 수 있는가", page)            # 실제 종합이 박스에
+            self.assertIn("지금 다니는 회사", page)            # 고민도 함께
 
     def test_find_art_prefers_council(self):
         with tempfile.TemporaryDirectory() as d:
