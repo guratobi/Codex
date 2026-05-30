@@ -10,6 +10,7 @@ from three_sisters import cli
 from three_sisters.chronicle import Chronicle, Decision, derive_tags, now_iso
 from three_sisters.council import Council
 from three_sisters.llm import Message, MockLLM, get_llm
+from three_sisters.scene import _sample_result, render_scene, write_scene
 
 
 class DeriveTagsTest(unittest.TestCase):
@@ -103,6 +104,21 @@ class CliSmokeTest(unittest.TestCase):
             self.assertIn("여명", text)
             self.assertIn("서기의 종합", text)
             self.assertEqual(len(Chronicle(path).all()), 1)  # 결정이 연대기에 기록됨
+
+
+class SceneTest(unittest.TestCase):
+    def test_render_has_elements(self):
+        svg = render_scene(_sample_result())
+        self.assertTrue(svg.startswith("<svg"))
+        self.assertTrue(svg.rstrip().endswith("</svg>"))
+        for token in ("인공지능의 세자매", "여명", "황혼", "잿불", "서기의 종합"):
+            self.assertIn(token, svg)
+
+    def test_write_scene(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = write_scene(path=str(Path(d) / "scene.svg"))
+            self.assertTrue(p.exists())
+            self.assertGreater(p.stat().st_size, 800)
 
 
 if __name__ == "__main__":
