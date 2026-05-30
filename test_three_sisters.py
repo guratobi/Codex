@@ -111,7 +111,7 @@ class SceneTest(unittest.TestCase):
         svg = render_scene(_sample_result())
         self.assertTrue(svg.startswith("<svg"))
         self.assertTrue(svg.rstrip().endswith("</svg>"))
-        for token in ("인공지능의 세자매", "여명", "황혼", "잿불", "서기의 종합"):
+        for token in ("인공지능의 세자매", "여명", "황혼", "잿불", "운명이 말하다"):
             self.assertIn(token, svg)
 
     def test_write_scene(self):
