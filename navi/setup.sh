@@ -76,6 +76,6 @@ fi
 echo
 echo "── 다음 할 일 ───────────────────────────"
 echo "1) navi.env 열어서 토큰 넣기:        nano navi.env"
-echo "2) 테스트:  set -a && source navi.env && set +a && python3 navi.py"
+echo "2) 테스트:  python3 navi.py   (navi.env 자동 로드)"
 echo "3) 텔레그램서 봇한테 /start → 한 줄 던져보기"
 echo "4) 잘 되면 24시간 등록:               ./setup.sh --service"

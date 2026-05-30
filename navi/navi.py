@@ -39,6 +39,23 @@ from pathlib import Path
 
 KST = timezone(timedelta(hours=9))
 
+
+def _load_env_file() -> None:
+    """navi.py 옆이나 현재 폴더의 navi.env 를 환경변수로 읽어온다.
+    이미 설정된 값은 덮지 않는다. 덕분에 OS 상관없이 `python navi.py` 만으로 동작."""
+    for p in (Path(__file__).resolve().parent / "navi.env", Path("navi.env")):
+        if p.exists():
+            for line in p.read_text("utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                os.environ.setdefault(key.strip(), val.strip())
+            break
+
+
+_load_env_file()
+
 # --- 설정 (환경변수) -------------------------------------------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 ENV_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
