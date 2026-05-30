@@ -31,6 +31,22 @@ python -m three_sisters
 
 연대기는 작업 디렉터리의 `chronicle.jsonl` 에 쌓인다.
 
+## 웹으로 띄우기 (브라우저에서 입력 → 세 자매가 답)
+
+```bash
+pip install -r requirements.txt              # fastapi, uvicorn, anthropic ...
+export ANTHROPIC_API_KEY=sk-...              # 없으면 목(mock)으로 동작
+uvicorn three_sisters.server:app --reload
+```
+
+브라우저로 <http://127.0.0.1:8000> 접속 → 고민을 입력하면 세 자매(여명·황혼·잿불)가
+각자 답하고 서기가 종합한다. 같은 화면을 정적 호스팅하면(예: GitHub Pages) 백엔드가 없으니
+클라이언트 목으로 폴백하고, 로컬 서버로 띄우면 `/api/ask` 를 통해 진짜 Claude가 추론한다.
+
+- **키는 서버(이 프로세스)에만** 있고 브라우저로는 내려가지 않는다.
+- 엔드포인트: `GET /`(화면) · `GET /api/health` · `POST /api/ask {dilemma}` ·
+  `POST /api/seal {dilemma, choice, rationale?}`(연대기에 결정 기록).
+
 ## 두뇌(LLM)와 캐싱
 
 `get_llm()` 한 곳이 백엔드를 고른다. 공용 서문(평의회 규칙)은 모든 자매·종합 호출이 공유하는 **고정 시스템 블록**이라 `prompt caching`(`cache_control`)을 건다 — 서문이 모델의 최소 캐시 길이(Opus ~4096 / Sonnet ~2048 토큰)를 넘으면 자매·결정·세션을 가로질러 캐시 적중한다. 페르소나/고민은 그 뒤에 붙어 자매별로 갈린다.
@@ -59,8 +75,9 @@ three_sisters/
   chronicle.py  # 연대기: 결정 기록·태그 회상
   narrate.py    # 터미널 연출
   cli.py        # 대화 루프 (I/O 주입 가능, 장면 자동 생성)
+  server.py     # 웹 백엔드(FastAPI): GET / · /api/ask · /api/seal · /api/health
   scene.py      # SVG 장면 (폴백/단독)
-  scene_html.py # 아트(PNG)+실시간 텍스트 HTML 합성 (아트 자동 탐색)
+  scene_html.py # 아트(PNG)+텍스트 HTML 합성 + 인터랙티브 페이지(백엔드 호출)
   assets/       # 장면 아트(council.png 등)를 두는 곳
 ```
 
