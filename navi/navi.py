@@ -20,6 +20,7 @@
   NAVI_WEBHOOK_SECRET 웹훅 보호용 키 (포트 켤 거면 반드시 설정)
   NAVI_CHAT_TTL_HOURS 이보다 오래된 텔레그램 채팅 메시지를 자동 삭제(시간). 0=끔,
                       최대 47 (텔레그램이 48시간 지난 메시지 삭제를 막음). 기본 12
+  NAVI_ARRIVE_COOLDOWN_MIN  같은 장소 도착 알림을 이 분(min) 안엔 한 번만 (기본 10)
 """
 from __future__ import annotations
 
@@ -70,6 +71,10 @@ try:
     CHAT_TTL_HOURS = max(0, min(47, int(os.environ.get("NAVI_CHAT_TTL_HOURS", "12"))))
 except ValueError:
     CHAT_TTL_HOURS = 12
+try:
+    ARRIVE_COOLDOWN = max(0, int(os.environ.get("NAVI_ARRIVE_COOLDOWN_MIN", "10"))) * 60
+except ValueError:
+    ARRIVE_COOLDOWN = 600
 
 API = f"https://api.telegram.org/bot{TOKEN}"
 STATE_PATH = STATE_DIR / "state.json"
@@ -108,6 +113,7 @@ HELP = (
 
 # --- 상태 ------------------------------------------------------------------
 state: dict = {}
+_state_lock = threading.Lock()  # 메인 루프와 웹훅 스레드가 같이 쓰므로 보호
 
 
 def load_state() -> None:
@@ -122,8 +128,9 @@ def load_state() -> None:
 
 
 def save_state() -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
+    with _state_lock:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False), "utf-8")
 
 
 def owner_id() -> str | None:
@@ -555,6 +562,18 @@ def cleanup_chat() -> None:
 
 
 # --- 도착 웹훅(옵션) --------------------------------------------------------
+def arrive_allowed(place: str) -> bool:
+    """도착 알림을 지금 보낼지 결정. 쿨다운 안의 중복(집 와이파이 2개,
+    GPS+와이파이 동시 등)은 막아서 한 번만 울리게 한다."""
+    now = int(time.time())
+    last = state.get("arrive", {}).get(place, 0)
+    if ARRIVE_COOLDOWN and now - last < ARRIVE_COOLDOWN:
+        return False
+    state.setdefault("arrive", {})[place] = now
+    save_state()
+    return True
+
+
 class ArriveHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         u = urllib.parse.urlparse(self.path)
@@ -565,10 +584,14 @@ class ArriveHandler(BaseHTTPRequestHandler):
             return
         raw = q.get("place", ["home"])[0]
         place = "work" if raw in ("work", "회사") else "home"
-        send(render_list(place, include_shared=True))
+        body = b"ok"
+        if arrive_allowed(place):
+            send(render_list(place, include_shared=True))
+        else:
+            body = b"skip"  # 쿨다운 중복 — 조용히 무시
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(body)
 
     def log_message(self, *args):  # 액세스 로그 끔
         pass
