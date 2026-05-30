@@ -71,12 +71,12 @@ test_weather_notify.py       # 단위 테스트 (의존성 없음)
 
 ---
 
-## 서원 (Seowon) — AI 에이전트 팀 + 자기학습 일지
+## 인공지능의 세자매 (The Three Sisters)
 
-`seowon/` 에 별도 프로토타입이 있습니다 → [seowon/README.md](seowon/README.md)
+`three_sisters/` 에 있습니다 → [three_sisters/README.md](three_sisters/README.md)
 
-기획·실행·검토 에이전트가 팀으로 협업하고, 작업 경험을 일기로 남겨 다음 작업에 회상·재사용합니다(영상의 "스스로 지혜를 쌓는 구조"). 키 없이 도는 데모:
+낙관·비관·실용 **세 AI 자매**가 그대의 현실 결정을 함께 본다. 고민을 평의회에 올리면 세 자매가 각자의 천성으로 조언하고, 서기가 트레이드오프를 종합하며, 최종 선택은 그대가 내린다 — 그 결정은 **연대기**에 새겨져 다음에 회상된다. (자문 회의를 중세 판타지로 게임화)
 
 ```bash
-python -m seowon.demo
+python -m three_sisters       # 키 있으면 진짜 Claude, 없으면 목으로 체험
 ```

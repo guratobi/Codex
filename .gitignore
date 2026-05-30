@@ -6,6 +6,5 @@ venv/
 .cache/
 .DS_Store
 
-# 생성되는 대시보드 산출물 (python -m seowon.dashboard 로 재생성)
-*_dashboard.html
-*_dashboard.svg
+# 세자매 연대기 (사용자별 결정 기록)
+chronicle.jsonl
