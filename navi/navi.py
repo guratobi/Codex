@@ -1,6 +1,6 @@
 """나비 — 항상 켜져 있는 개인 비서 에이전트.
 
-텔레그램으로 한 줄 던지면 '집/회사/양쪽'으로 분류해 기억해 두고,
+텔레그램으로 한 줄 던지면 '집/회사/공통'으로 분류해 기억해 두고,
 정해진 시각(출근/퇴근 즈음)에 그 장소의 할 일을 먼저 알려준다.
 끝낸 일은 시각과 함께 done 으로 옮기고, 모든 변화는 깃 + log.jsonl 에 장부로 남는다.
 
@@ -59,7 +59,7 @@ STATE_PATH = STATE_DIR / "state.json"
 ABOUT_PATH = Path(__file__).resolve().parent / "ABOUT.md"
 
 EMOJI = {"home": "🏠", "work": "🏢", "both": "🔁"}
-NAME = {"home": "집", "work": "회사", "both": "양쪽"}
+NAME = {"home": "집", "work": "회사", "both": "공통"}
 
 # 분류 키워드. '이직/이력서/면접'류는 일부러 집(개인) 쪽에 둔다 —
 # 회사 노트북 화면(SessionStart 훅)에 절대 안 뜨게 하려는 의도.
@@ -79,10 +79,10 @@ HELP = (
     "• 그냥 한 줄 던져 → 집/회사 자동 분류 (애매하면 내가 되물어봄)\n"
     "• 집: 빨래 돌리기      ← 집 일로 바로 추가\n"
     "• 회사: KPI 경로 확정  ← 회사 일로 바로 추가\n"
-    "• 양쪽: 여권 챙기기    ← 집·회사 양쪽에 다 뜨게\n"
-    "• 집 / 회사 / 양쪽     ← 그 목록 보기\n"
+    "• 공통: 여권 챙기기    ← 집·회사 둘 다에 뜨게\n"
+    "• 집 / 회사 / 공통     ← 그 목록 보기\n"
     "• 끝 a1b2             ← 그 일 완료 (id는 목록에 떠 있어)\n"
-    "• 목록                ← 집·회사·양쪽 전체 보기\n"
+    "• 목록                ← 집·회사·공통 전체 보기\n"
     "• 인박스              ← 분류 대기 중인 거\n"
     "\n"
     "정해둔 시각엔 내가 먼저 그날 목록을 보내줄게."
@@ -200,7 +200,7 @@ def path_for(place: str) -> Path:
 def ensure_brain() -> None:
     BRAIN_DIR.mkdir(parents=True, exist_ok=True)
     titles = {"inbox": "📥 인박스 (분류 대기)", "home": "🏠 집", "work": "🏢 회사",
-              "both": "🔁 양쪽(집·회사 공통)", "done": "✅ 끝낸 일"}
+              "both": "🔁 공통(집·회사)", "done": "✅ 끝낸 일"}
     for place, title in titles.items():
         p = BRAIN_DIR / f"{place}.md"
         if not p.exists():
@@ -363,8 +363,8 @@ def render_inbox() -> str:
     items = active_items("inbox")
     if not items:
         return "📥 인박스 비었음"
-    lines = ["📥 인박스 (집/회사/양쪽 정해줘)"]
-    lines += [f"• ({it['id']}) {it['text']}  → 집 {it['id']} / 회사 {it['id']} / 양쪽 {it['id']}"
+    lines = ["📥 인박스 (집/회사/공통 정해줘)"]
+    lines += [f"• ({it['id']}) {it['text']}  → 집 {it['id']} / 회사 {it['id']} / 공통 {it['id']}"
               for it in items]
     return "\n".join(lines)
 
@@ -438,7 +438,7 @@ def handle_text(text: str) -> None:
     iid = add_inbox(t)
     state["pending"] = iid
     save_state()
-    send(f"📥 받았어: “{t}”\n집이야 회사야, 아님 양쪽이야? (집 / 회사 / 양쪽)")
+    send(f"📥 받았어: “{t}”\n집이야 회사야, 공통이야? (집 / 회사 / 공통)")
 
 
 def handle_update(u: dict) -> None:
