@@ -1,0 +1,9 @@
+[Unit]
+Description=저장한 메시지 청소기를 매일 실행
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

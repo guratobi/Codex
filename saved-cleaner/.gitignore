@@ -1,0 +1,4 @@
+# 비밀·세션은 절대 커밋 금지
+cleaner.env
+*.session
+*.session-journal

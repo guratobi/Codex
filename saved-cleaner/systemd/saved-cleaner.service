@@ -1,0 +1,11 @@
+[Unit]
+Description=Telegram 저장한 메시지 청소기 (oneshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 아래 REPLACE_USER 를 검둥이 사용자명으로 바꾼다 (예: ubuntu)
+User=REPLACE_USER
+WorkingDirectory=/home/REPLACE_USER/Codex/saved-cleaner
+ExecStart=/home/REPLACE_USER/Codex/saved-cleaner/.venv/bin/python /home/REPLACE_USER/Codex/saved-cleaner/cleaner.py
