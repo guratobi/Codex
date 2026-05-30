@@ -5,8 +5,10 @@ from . import narrate
 from .chronicle import Chronicle
 from .council import Council
 from .llm import LLM, get_llm
+from .scene_html import write_council_html
 
 DEFAULT_CHRONICLE = "chronicle.jsonl"
+SCENE_PATH = "council.html"
 
 
 def run(
@@ -14,8 +16,13 @@ def run(
     chronicle_path: str = DEFAULT_CHRONICLE,
     input_fn=input,
     output_fn=print,
+    scene_path: str | None = SCENE_PATH,
 ) -> None:
-    """대화 루프. 테스트/데모를 위해 input_fn/output_fn 을 주입할 수 있다."""
+    """대화 루프. 테스트/데모를 위해 input_fn/output_fn 을 주입할 수 있다.
+
+    scene_path 가 주어지면 매 평의회 후 그 결과로 HTML 장면을 갱신한다
+    (assets/ 에 아트가 있으면 그 위에, 없으면 SVG 폴백).
+    """
     llm = llm or get_llm()
     council = Council(llm, Chronicle(chronicle_path))
 
@@ -30,6 +37,13 @@ def run(
 
         result = council.deliberate(dilemma)
         narrate.render(result, output_fn)
+
+        if scene_path:
+            try:
+                write_council_html(result, path=scene_path)
+                output_fn(f"\n  (장면을 {scene_path} 에 담았다 — 브라우저로 열어보라)")
+            except Exception as exc:  # noqa: BLE001 - 장면 실패가 평의회를 막지 않게
+                output_fn(f"\n  (장면 생성 실패: {exc})")
 
         choice = input_fn("\n\U0001F772 그대의 결정은? (건너뛰려면 빈 줄): ").strip()
         if choice:
