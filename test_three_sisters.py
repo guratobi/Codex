@@ -11,7 +11,7 @@ from three_sisters.chronicle import Chronicle, Decision, derive_tags, now_iso
 from three_sisters.council import Council
 from three_sisters.llm import Message, MockLLM, get_llm
 from three_sisters.scene import _sample_result, render_scene, write_scene
-from three_sisters.scene_html import render_council_html, write_council_html
+from three_sisters.scene_html import find_art, render_council_html, write_council_html
 
 
 class DeriveTagsTest(unittest.TestCase):
@@ -94,17 +94,20 @@ class CliSmokeTest(unittest.TestCase):
         out_lines: list[str] = []
         with tempfile.TemporaryDirectory() as d:
             path = str(Path(d) / "c.jsonl")
+            scene = str(Path(d) / "council.html")
             cli.run(
                 llm=MockLLM(),
                 chronicle_path=path,
                 input_fn=lambda _prompt="": next(inputs),
                 output_fn=out_lines.append,
+                scene_path=scene,
             )
             text = "\n".join(out_lines)
             self.assertIn("인공지능의 세자매", text)
             self.assertIn("여명", text)
             self.assertIn("서기의 종합", text)
             self.assertEqual(len(Chronicle(path).all()), 1)  # 결정이 연대기에 기록됨
+            self.assertTrue(Path(scene).exists())  # 장면 HTML 이 생성됨
 
 
 class SceneTest(unittest.TestCase):
@@ -121,17 +124,43 @@ class SceneTest(unittest.TestCase):
             self.assertTrue(p.exists())
             self.assertGreater(p.stat().st_size, 800)
 
-    def test_html_overlays_live_result(self):
-        r = _sample_result()
-        page = render_council_html(r, image="art.png")
+    def test_html_fallback_inlines_svg_with_live_text(self):
+        # 아트 없음(art=False) → SVG 폴백, 실시간 텍스트 포함
+        page = render_council_html(_sample_result(), art=False)
         self.assertIn("<!doctype html>", page)
-        self.assertIn("art.png", page)
-        self.assertIn("운명이 말하다", page)
-        self.assertIn("되돌릴 수 있는가", page)  # 실제 종합이 박스에 들어감 (HTML 이스케이프 무관 구간)
+        self.assertIn("<svg", page)
+        self.assertIn("되돌릴 수 있는가", page)
+
+    def test_html_uses_art_when_present(self):
+        # 가짜 이미지 파일을 주면 base64 임베드 + 오버레이 박스
+        with tempfile.TemporaryDirectory() as d:
+            art = Path(d) / "council.png"
+            art.write_bytes(b"\x89PNG\r\n\x1a\n fake png bytes")
+            page = render_council_html(_sample_result(), art=art)
+            self.assertIn("data:image/png;base64,", page)
+            self.assertIn("운명이 말하다", page)
+            self.assertIn("되돌릴 수 있는가", page)  # 실제 종합이 박스에
+
+    def test_find_art_prefers_council(self):
+        with tempfile.TemporaryDirectory() as d:
+            assets = Path(d)
+            (assets / "zzz.png").write_bytes(b"x")
+            (assets / "council.png").write_bytes(b"y")
+            self.assertEqual(find_art(assets).name, "council.png")
+
+    def test_find_art_falls_back_to_any_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            assets = Path(d)
+            (assets / "scene.webp").write_bytes(b"x")
+            self.assertEqual(find_art(assets).name, "scene.webp")
+
+    def test_find_art_none_when_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(find_art(Path(d)))
 
     def test_write_council_html(self):
         with tempfile.TemporaryDirectory() as d:
-            p = write_council_html(path=str(Path(d) / "c.html"))
+            p = write_council_html(path=str(Path(d) / "c.html"), art=False)
             self.assertTrue(p.exists())
             self.assertGreater(p.stat().st_size, 400)
 

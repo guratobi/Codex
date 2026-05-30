@@ -35,6 +35,20 @@ python -m three_sisters
 
 `get_llm()` 한 곳이 백엔드를 고른다. 공용 서문(평의회 규칙)은 모든 자매·종합 호출이 공유하는 **고정 시스템 블록**이라 `prompt caching`(`cache_control`)을 건다 — 서문이 모델의 최소 캐시 길이(Opus ~4096 / Sonnet ~2048 토큰)를 넘으면 자매·결정·세션을 가로질러 캐시 적중한다. 페르소나/고민은 그 뒤에 붙어 자매별로 갈린다.
 
+## 장면(비주얼)
+
+평의회 결과는 한 장의 그림으로도 뽑힌다.
+
+```bash
+python -m three_sisters.scene_html   # council.html  (브라우저로 열기)
+python -m three_sisters.scene        # three_sisters_council.svg
+```
+
+- **AI 아트 자동 사용**: `three_sisters/assets/` 에 이미지(파일명 무관, `council.png` 우선)를
+  넣어두면 그걸 배경으로 쓰고, 맨 아래 "운명이 말하다" 박스에만 **실제 평의회 결과**를 덧씌운다.
+- **폴백**: 이미지가 없으면 코드로 그린 SVG 장면(`scene.py`)을 자동으로 깐다.
+- `python -m three_sisters` 로 평의회를 돌리면 매번 `council.html` 이 그 결과로 갱신된다.
+
 ## 구조
 
 ```
@@ -44,7 +58,10 @@ three_sisters/
   council.py    # 평의회: 회상 → 세 조언 → 종합 → 인장(기록)
   chronicle.py  # 연대기: 결정 기록·태그 회상
   narrate.py    # 터미널 연출
-  cli.py        # 대화 루프 (I/O 주입 가능)
+  cli.py        # 대화 루프 (I/O 주입 가능, 장면 자동 생성)
+  scene.py      # SVG 장면 (폴백/단독)
+  scene_html.py # 아트(PNG)+실시간 텍스트 HTML 합성 (아트 자동 탐색)
+  assets/       # 장면 아트(council.png 등)를 두는 곳
 ```
 
 ## 테스트
