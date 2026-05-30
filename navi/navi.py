@@ -18,9 +18,12 @@
   NAVI_GIT            "off" 면 깃 커밋/푸시 끔 (기본 on, brain 이 깃 레포일 때만 동작)
   NAVI_WEBHOOK_PORT   GPS 도착 푸시용 포트 (설정하면 활성화, 미설정 시 끔)
   NAVI_WEBHOOK_SECRET 웹훅 보호용 키 (포트 켤 거면 반드시 설정)
+  NAVI_CHAT_TTL_HOURS 이보다 오래된 텔레그램 채팅 메시지를 자동 삭제(시간). 0=끔,
+                      최대 47 (텔레그램이 48시간 지난 메시지 삭제를 막음). 기본 12
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -46,9 +49,14 @@ PUSH_HOME = os.environ.get("NAVI_PUSH_HOME", "19:00")
 GIT_ON = os.environ.get("NAVI_GIT", "on").lower() != "off"
 WEBHOOK_PORT = os.environ.get("NAVI_WEBHOOK_PORT", "").strip()
 WEBHOOK_SECRET = os.environ.get("NAVI_WEBHOOK_SECRET", "").strip()
+try:
+    CHAT_TTL_HOURS = max(0, min(47, int(os.environ.get("NAVI_CHAT_TTL_HOURS", "12"))))
+except ValueError:
+    CHAT_TTL_HOURS = 12
 
 API = f"https://api.telegram.org/bot{TOKEN}"
 STATE_PATH = STATE_DIR / "state.json"
+ABOUT_PATH = Path(__file__).resolve().parent / "ABOUT.md"
 
 EMOJI = {"home": "🏠", "work": "🏢"}
 NAME = {"home": "집", "work": "회사"}
@@ -112,15 +120,60 @@ def tg_call(method: str, params: dict, timeout: int = 35) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def send(text: str, chat_id: str | None = None) -> None:
+def tg_post(method: str, params: dict, timeout: int = 15) -> dict:
+    data = urllib.parse.urlencode(params).encode("utf-8")
+    req = urllib.request.Request(f"{API}/{method}", data=data, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def record_msg(mid: int, ts: int | None = None) -> None:
+    """청소 대상으로 메시지 id 기록 (나비가 보낸 것 + 받은 것)."""
+    state.setdefault("msgs", []).append([mid, int(ts or time.time())])
+    save_state()
+
+
+def send(text: str, chat_id: str | None = None, track: bool = True,
+         silent: bool = False) -> int | None:
     target = chat_id or owner_id()
     if not target:
         print("[warn] 보낼 대상(주인)이 아직 없음", file=sys.stderr)
-        return
+        return None
     try:
-        tg_call("sendMessage", {"chat_id": target, "text": text}, timeout=15)
+        params = {"chat_id": target, "text": text}
+        if silent:
+            params["disable_notification"] = "true"
+        res = tg_post("sendMessage", params)
+        mid = res.get("result", {}).get("message_id")
+        if track and mid:
+            record_msg(mid)
+        return mid
     except Exception as exc:  # 전송 실패해도 루프는 살아 있어야 함
         print(f"[warn] sendMessage 실패: {exc}", file=sys.stderr)
+        return None
+
+
+def delete_message(mid: int) -> None:
+    try:
+        tg_call("deleteMessage", {"chat_id": owner_id(), "message_id": mid}, 10)
+    except Exception:  # 48시간 지난 메시지 등은 못 지움 — 조용히 넘어간다
+        pass
+
+
+def pin_message(mid: int) -> None:
+    try:
+        tg_call("pinChatMessage",
+                {"chat_id": owner_id(), "message_id": mid,
+                 "disable_notification": "true"}, 10)
+    except Exception as exc:
+        print(f"[warn] pin 실패: {exc}", file=sys.stderr)
+
+
+def unpin_message(mid: int) -> None:
+    try:
+        tg_call("unpinChatMessage", {"chat_id": owner_id(), "message_id": mid}, 10)
+    except Exception:
+        pass
 
 
 def get_updates(offset: int) -> list[dict]:
@@ -380,9 +433,11 @@ def handle_update(u: dict) -> None:
         state["owner"] = sender
         save_state()
         print(f"[info] 주인 등록: {sender}")
+        publish_intro()
     if sender != owner_id():
         return  # 남의 메시지는 무시
 
+    record_msg(msg["message_id"], msg.get("date"))  # 받은 줄도 청소 대상
     text = msg.get("text")
     if text:
         handle_text(text)
@@ -407,6 +462,54 @@ def maybe_push() -> None:
         save_state()
         if active_items("home"):
             send(render_list("home"))
+
+
+# --- 자기소개 공지 / 채팅 청소 ---------------------------------------------
+def publish_intro() -> None:
+    """ABOUT.md 를 텔레그램에 고정 공지로 올린다. 내용이 바뀌었을 때만 갱신."""
+    if not owner_id() or not ABOUT_PATH.exists():
+        return
+    text = ABOUT_PATH.read_text("utf-8").strip()
+    if not text:
+        return
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    if state.get("intro_hash") == digest and state.get("intro_msg_id"):
+        return  # 이미 최신 소개가 고정돼 있음
+    old = state.get("intro_msg_id")
+    if old:
+        unpin_message(old)
+        delete_message(old)
+    mid = send(text, track=False, silent=True)  # 고정 메시지는 청소 대상 아님
+    if mid:
+        pin_message(mid)
+        state["intro_msg_id"] = mid
+        state["intro_hash"] = digest
+        save_state()
+        print(f"[info] 자기소개 공지 갱신/고정 (msg {mid})")
+
+
+def cleanup_chat() -> None:
+    """TTL 보다 오래된 채팅 메시지를 지운다. 고정 공지는 건드리지 않는다."""
+    if CHAT_TTL_HOURS <= 0:
+        return
+    ttl = CHAT_TTL_HOURS * 3600
+    now = int(time.time())
+    pinned = state.get("intro_msg_id")
+    keep, changed = [], False
+    for mid, ts in state.get("msgs", []):
+        if mid == pinned:
+            changed = True
+            continue
+        age = now - ts
+        if age > ttl:
+            if age < 48 * 3600:       # 텔레그램은 48시간 지난 건 못 지움
+                delete_message(mid)
+            changed = True            # 지웠거나, 너무 오래돼 포기 → 추적 종료
+        else:
+            keep.append([mid, ts])
+    if changed:
+        state["msgs"] = keep
+        save_state()
 
 
 # --- 도착 웹훅(옵션) --------------------------------------------------------
@@ -450,8 +553,7 @@ def main() -> None:
     load_state()
     start_webhook()
     print(f"[info] 나비 기동. brain={BRAIN_DIR} 회사푸시={PUSH_WORK} 집푸시={PUSH_HOME}")
-    if owner_id():
-        send("🧚 나비 깨어났어. (도움말은 /help)")
+    publish_intro()  # 자기소개를 고정 공지로 (내용 바뀐 경우에만 갱신)
 
     offset = state.get("offset", 0)
     while True:
@@ -464,6 +566,7 @@ def main() -> None:
             except Exception as exc:  # 한 메시지 처리 실패가 봇을 죽이면 안 됨
                 print(f"[warn] handle_update 실패: {exc}", file=sys.stderr)
         maybe_push()
+        cleanup_chat()
 
 
 if __name__ == "__main__":
