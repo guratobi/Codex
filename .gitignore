@@ -11,3 +11,6 @@ chronicle.jsonl
 
 # 생성되는 평의회 장면 (python -m three_sisters.scene 로 재생성)
 three_sisters_council.svg
+
+# 생성되는 평의회 HTML
+council.html

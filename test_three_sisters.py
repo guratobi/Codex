@@ -11,6 +11,7 @@ from three_sisters.chronicle import Chronicle, Decision, derive_tags, now_iso
 from three_sisters.council import Council
 from three_sisters.llm import Message, MockLLM, get_llm
 from three_sisters.scene import _sample_result, render_scene, write_scene
+from three_sisters.scene_html import render_council_html, write_council_html
 
 
 class DeriveTagsTest(unittest.TestCase):
@@ -119,6 +120,20 @@ class SceneTest(unittest.TestCase):
             p = write_scene(path=str(Path(d) / "scene.svg"))
             self.assertTrue(p.exists())
             self.assertGreater(p.stat().st_size, 800)
+
+    def test_html_overlays_live_result(self):
+        r = _sample_result()
+        page = render_council_html(r, image="art.png")
+        self.assertIn("<!doctype html>", page)
+        self.assertIn("art.png", page)
+        self.assertIn("운명이 말하다", page)
+        self.assertIn(r.synthesis[:12], page)  # 실제 종합이 박스에 들어감
+
+    def test_write_council_html(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = write_council_html(path=str(Path(d) / "c.html"))
+            self.assertTrue(p.exists())
+            self.assertGreater(p.stat().st_size, 400)
 
 
 if __name__ == "__main__":
