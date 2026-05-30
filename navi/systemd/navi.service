@@ -1,0 +1,17 @@
+[Unit]
+Description=Navi — personal assistant agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 아래 YOUR_USER 와 경로를 네 우분투 박스에 맞게 바꿔라.
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/Codex/navi
+EnvironmentFile=/home/YOUR_USER/Codex/navi/navi.env
+ExecStart=/usr/bin/python3 /home/YOUR_USER/Codex/navi/navi.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
