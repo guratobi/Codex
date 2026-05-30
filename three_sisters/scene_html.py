@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import mimetypes
 from pathlib import Path
 
@@ -102,6 +103,88 @@ def render_council_html(result: CouncilResult, art: Path | None | bool = None) -
     return _HEAD + body + _FATE_BODY.format(
         pos=pos, dilemma=_esc(result.dilemma), synthesis=_esc(result.synthesis)
     )
+
+
+# ── 인터랙티브 버전: 브라우저에서 직접 고민을 입력 → 세 자매가 답 ──────────
+# 서버 없이 클라이언트(JS)에서 목(mock) 두뇌로 응답. 아트의 하단 박스는 통째로
+# 다시 그려 겹침을 없애고, 세 자매의 답은 그림 아래 넉넉한 패널에 크게 보여준다.
+
+_INTERACTIVE = """<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>인공지능의 세자매</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&display=swap');
+*{box-sizing:border-box}
+body{margin:0;background:#0b0814;color:#e8dec8;
+ font-family:'Gowun Batang','Nanum Myeongjo','Apple SD Gothic Neo',serif;
+ display:flex;flex-direction:column;align-items:center;padding:0 0 48px}
+.scene{position:relative;width:min(100vw,1000px)}
+.scene>img{width:100%;display:block;image-rendering:pixelated}
+.fate{position:absolute;left:9.3%;right:9.3%;top:81.8%;bottom:3.3%;
+ background:#12101f;border:2px solid #b89a52;border-radius:6px;padding:10px 26px;
+ display:flex;flex-direction:column;justify-content:center;overflow:auto}
+.fate h3{margin:0 0 6px;color:#f0d27a;font-size:clamp(13px,1.7vw,18px);letter-spacing:1px}
+.fate p{margin:0;color:#f3ead4;font-size:clamp(12px,1.8vw,18px);line-height:1.5}
+.ask{width:min(94vw,1000px);display:flex;gap:8px;margin-top:18px}
+.ask input{flex:1;padding:13px 15px;background:#14111f;border:2px solid #4a3f6e;
+ border-radius:10px;color:#f3ead4;font-family:inherit;font-size:16px}
+.ask button{padding:13px 22px;background:linear-gradient(#d3ab50,#9f7c2c);border:0;
+ border-radius:10px;color:#1a1208;font-family:inherit;font-weight:700;font-size:16px;cursor:pointer}
+.sisters{width:min(94vw,1000px);display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+.sis{background:#12101f;border:1px solid #2a2342;border-top:4px solid var(--c);border-radius:10px;padding:14px 16px}
+.sis h4{margin:0 0 8px;color:var(--c);font-size:16px}
+.sis p{margin:0;font-size:15px;line-height:1.6;color:#ddd3bf}
+.hint{color:#8c84a6;font-size:13px;margin-top:16px;max-width:min(94vw,1000px);text-align:center;line-height:1.6}
+@media(max-width:620px){.sisters{grid-template-columns:1fr}}
+</style></head><body>
+<div class="scene">
+<img src="__ART__" alt="인공지능의 세자매">
+<div class="fate"><h3>◆ 운명이 말하다</h3><p id="synth"></p></div>
+</div>
+<form class="ask" onsubmit="return ask(event)">
+<input id="q" autocomplete="off" placeholder="그대의 고민을 말하라…">
+<button>평의회에 묻다</button>
+</form>
+<div class="sisters">
+<div class="sis" style="--c:#e0a23a"><h4>여명 · 낙관의 자매</h4><p id="dawn"></p></div>
+<div class="sis" style="--c:#9d8cdf"><h4>황혼 · 경계의 자매</h4><p id="dusk"></p></div>
+<div class="sis" style="--c:#e0693f"><h4>잿불 · 실리의 자매</h4><p id="ember"></p></div>
+</div>
+<div class="hint">※ 지금은 '목(mock)' 두뇌라 답이 정형화돼 있다. 진짜 Claude를 연결하면 세 자매가 실제로 추론한다.</div>
+<script>
+function council(d){d=(d||'').trim()||'그 고민';return{
+dawn:"'"+d+"' — 이건 기회다. 잘 풀렸을 때 얻을 것을 보라. 망설임이 가장 큰 손해일 수 있다.",
+dusk:"'"+d+"' — 잠깐, 최악을 그려보자. 무엇을 잃을 수 있고, 이 선택은 되돌릴 수 있는가?",
+ember:"'"+d+"' — 감정을 걷고 비용과 실행을 재자. 지금 할 수 있는 가장 작은 첫 걸음은 무엇인가?",
+synth:"핵심은 '되돌릴 수 있는가'다. 되돌릴 수 있다면 작게 시험하고, 없다면 더 신중하라. 다만 최종 선택은 그대의 몫이다."};}
+function render(r){synth.textContent=r.synth;dawn.textContent=r.dawn;dusk.textContent=r.dusk;ember.textContent=r.ember;}
+function ask(e){e.preventDefault();render(council(q.value));return false;}
+q.value=__DILEMMA__;render(council(q.value));
+</script>
+</body></html>"""
+
+
+def render_interactive_html(result: CouncilResult | None = None, art: Path | None | bool = None) -> str:
+    """브라우저에서 직접 고민을 입력하는 인터랙티브 페이지(클라이언트 목 두뇌)."""
+    result = result or _sample_result()
+    if art is None:
+        art = find_art()
+    elif art is False:
+        art = None
+    src = _data_uri(Path(art)) if (art and Path(art).is_file()) else ""
+    return _INTERACTIVE.replace("__ART__", src).replace("__DILEMMA__", json.dumps(result.dilemma, ensure_ascii=False))
+
+
+def write_interactive_html(
+    result: CouncilResult | None = None,
+    path: str = "docs/index.html",
+    art: Path | None | bool = None,
+) -> Path:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(render_interactive_html(result, art), encoding="utf-8")
+    return p
 
 
 def write_council_html(

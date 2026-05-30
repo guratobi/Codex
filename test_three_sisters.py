@@ -11,7 +11,13 @@ from three_sisters.chronicle import Chronicle, Decision, derive_tags, now_iso
 from three_sisters.council import Council
 from three_sisters.llm import Message, MockLLM, get_llm
 from three_sisters.scene import _sample_result, render_scene, write_scene
-from three_sisters.scene_html import find_art, render_council_html, write_council_html
+from three_sisters.scene_html import (
+    find_art,
+    render_council_html,
+    render_interactive_html,
+    write_council_html,
+    write_interactive_html,
+)
 
 
 class DeriveTagsTest(unittest.TestCase):
@@ -164,6 +170,24 @@ class SceneTest(unittest.TestCase):
             p = write_council_html(path=str(Path(d) / "c.html"), art=False)
             self.assertTrue(p.exists())
             self.assertGreater(p.stat().st_size, 400)
+
+    def test_interactive_html_has_input_and_js(self):
+        with tempfile.TemporaryDirectory() as d:
+            art = Path(d) / "council.png"
+            art.write_bytes(b"\x89PNG\r\n\x1a\n fake")
+            page = render_interactive_html(_sample_result(), art=art)
+            self.assertIn('id="q"', page)            # 입력창
+            self.assertIn("평의회에 묻다", page)        # 버튼
+            self.assertIn("function council", page)   # 클라이언트 목 두뇌
+            self.assertIn("data:image/png;base64,", page)
+            for sid in ('id="dawn"', 'id="dusk"', 'id="ember"', 'id="synth"'):
+                self.assertIn(sid, page)
+
+    def test_write_interactive_html(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = write_interactive_html(path=str(Path(d) / "sub" / "index.html"), art=False)
+            self.assertTrue(p.exists())  # 부모 폴더 자동 생성
+            self.assertIn("function council", p.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
