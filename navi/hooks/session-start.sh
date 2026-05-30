@@ -17,7 +17,7 @@ w=$(grep -E '^- \[ \]' "$WORK" 2>/dev/null | sed -E 's/^- \[ \] /  • /' || tru
 b=$(grep -E '^- \[ \]' "$BOTH" 2>/dev/null | sed -E 's/^- \[ \] /  • /' || true)
 if [[ -n "$w" || -n "$b" ]]; then
   [[ -n "$w" ]] && echo "$w"
-  [[ -n "$b" ]] && { echo "  🔁 양쪽:"; echo "$b"; }
+  [[ -n "$b" ]] && { echo "  🔁 공통:"; echo "$b"; }
 else
   echo "  • (없음)"
 fi
