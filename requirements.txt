@@ -1,3 +1,9 @@
 # 진짜 Claude(AnthropicLLM)를 쓸 때만 필요.
-# MockLLM 과 테스트는 표준 라이브러리만으로 동작한다 (설치 불필요).
+# MockLLM 과 (코어) 테스트는 표준 라이브러리만으로 동작한다 (설치 불필요).
 anthropic>=0.40
+
+# 웹으로 띄울 때(three_sisters.server) 필요.
+#   uvicorn three_sisters.server:app --reload
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27          # 서버 테스트의 TestClient 용

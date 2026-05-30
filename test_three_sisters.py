@@ -19,6 +19,16 @@ from three_sisters.scene_html import (
     write_interactive_html,
 )
 
+# 웹 서버 테스트는 fastapi/httpx 가 있을 때만 (코어 스위트는 표준 라이브러리만으로 통과).
+try:
+    from fastapi.testclient import TestClient
+
+    from three_sisters.server import create_app
+
+    _HAS_WEB = True
+except Exception:  # noqa: BLE001
+    _HAS_WEB = False
+
 
 class DeriveTagsTest(unittest.TestCase):
     def test_deterministic(self):
@@ -188,6 +198,52 @@ class SceneTest(unittest.TestCase):
             p = write_interactive_html(path=str(Path(d) / "sub" / "index.html"), art=False)
             self.assertTrue(p.exists())  # 부모 폴더 자동 생성
             self.assertIn("function council", p.read_text(encoding="utf-8"))
+
+
+@unittest.skipUnless(_HAS_WEB, "fastapi/httpx 미설치 — 웹 서버 테스트 건너뜀")
+class ServerTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        chron = str(Path(self._tmp.name) / "chronicle.jsonl")
+        self.client = TestClient(create_app(MockLLM(), chronicle_path=chron))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_index_serves_interactive_page(self):
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("평의회에 묻다", r.text)
+        self.assertIn("api/ask", r.text)  # 페이지가 백엔드를 부른다
+
+    def test_health_reports_mock_brain(self):
+        r = self.client.get("/api/health")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["brain"], "mock")
+
+    def test_ask_returns_three_sisters_and_synthesis(self):
+        r = self.client.post("/api/ask", json={"dilemma": "이직할까"})
+        self.assertEqual(r.status_code, 200)
+        j = r.json()
+        for key in ("dawn", "dusk", "ember", "synth"):
+            self.assertTrue(j[key], f"{key} 비어있음")
+        self.assertIn("이직할까", j["dawn"])     # 목이 고민을 반영
+        self.assertEqual(j["brain"], "mock")
+
+    def test_ask_empty_is_400(self):
+        r = self.client.post("/api/ask", json={"dilemma": "   "})
+        self.assertEqual(r.status_code, 400)
+
+    def test_seal_then_recall(self):
+        sealed = self.client.post(
+            "/api/seal",
+            json={"dilemma": "이직 고민", "choice": "이직한다", "rationale": "성장"},
+        )
+        self.assertEqual(sealed.status_code, 200)
+        # 태그('이직')가 겹치는 새 고민 → 과거 결정을 회상해야 한다
+        r = self.client.post("/api/ask", json={"dilemma": "이직 다시 고민"})
+        recalled = r.json()["recalled"]
+        self.assertTrue(any(x["choice"] == "이직한다" for x in recalled))
 
 
 if __name__ == "__main__":

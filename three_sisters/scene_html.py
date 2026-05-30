@@ -136,6 +136,9 @@ body{margin:0;background:#0b0814;color:#e8dec8;
 .sis h4{margin:0 0 8px;color:var(--c);font-size:16px}
 .sis p{margin:0;font-size:15px;line-height:1.6;color:#ddd3bf}
 .hint{color:#8c84a6;font-size:13px;margin-top:16px;max-width:min(94vw,1000px);text-align:center;line-height:1.6}
+.hint b{color:#cdbff0;font-weight:700}
+.recall{color:#9b86d6;font-size:13px;margin-top:12px;max-width:min(94vw,1000px);text-align:center;line-height:1.5}
+.ask button[disabled]{opacity:.6;cursor:default}
 @media(max-width:620px){.sisters{grid-template-columns:1fr}}
 </style></head><body>
 <div class="scene">
@@ -144,23 +147,35 @@ body{margin:0;background:#0b0814;color:#e8dec8;
 </div>
 <form class="ask" onsubmit="return ask(event)">
 <input id="q" autocomplete="off" placeholder="그대의 고민을 말하라…">
-<button>평의회에 묻다</button>
+<button id="go">평의회에 묻다</button>
 </form>
+<div id="recall" class="recall"></div>
 <div class="sisters">
 <div class="sis" style="--c:#e0a23a"><h4>여명 · 낙관의 자매</h4><p id="dawn"></p></div>
 <div class="sis" style="--c:#9d8cdf"><h4>황혼 · 경계의 자매</h4><p id="dusk"></p></div>
 <div class="sis" style="--c:#e0693f"><h4>잿불 · 실리의 자매</h4><p id="ember"></p></div>
 </div>
-<div class="hint">※ 지금은 '목(mock)' 두뇌라 답이 정형화돼 있다. 진짜 Claude를 연결하면 세 자매가 실제로 추론한다.</div>
+<div class="hint"><b id="brain">목(mock) 두뇌</b> · 입력하면 세 자매가 답한다. 로컬 서버로 띄우면 진짜 Claude가 추론한다.</div>
 <script>
+// 백엔드(/api/ask)를 먼저 부르고, 없으면(예: 정적 호스팅) 클라이언트 목으로 폴백.
 function council(d){d=(d||'').trim()||'그 고민';return{
 dawn:"'"+d+"' — 이건 기회다. 잘 풀렸을 때 얻을 것을 보라. 망설임이 가장 큰 손해일 수 있다.",
 dusk:"'"+d+"' — 잠깐, 최악을 그려보자. 무엇을 잃을 수 있고, 이 선택은 되돌릴 수 있는가?",
 ember:"'"+d+"' — 감정을 걷고 비용과 실행을 재자. 지금 할 수 있는 가장 작은 첫 걸음은 무엇인가?",
 synth:"핵심은 '되돌릴 수 있는가'다. 되돌릴 수 있다면 작게 시험하고, 없다면 더 신중하라. 다만 최종 선택은 그대의 몫이다."};}
-function render(r){synth.textContent=r.synth;dawn.textContent=r.dawn;dusk.textContent=r.dusk;ember.textContent=r.ember;}
-function ask(e){e.preventDefault();render(council(q.value));return false;}
-q.value=__DILEMMA__;render(council(q.value));
+function el(id){return document.getElementById(id);}
+function setBrain(b){el('brain').textContent=(b==='claude')?'🔮 진짜 Claude 연결됨':'목(mock) 두뇌';}
+function setBusy(b){var g=el('go');g.disabled=b;g.textContent=b?'세 자매가 숙고 중…':'평의회에 묻다';
+ if(b){el('synth').textContent='세 자매가 그대의 고민을 숙고하고 있다…';el('dawn').textContent=el('dusk').textContent=el('ember').textContent='…';}}
+function render(r){el('synth').textContent=r.synth;el('dawn').textContent=r.dawn;el('dusk').textContent=r.dusk;el('ember').textContent=r.ember;
+ var rc=el('recall');rc.textContent=(r.recalled&&r.recalled.length)?('지난 결정을 기억함 — '+r.recalled.map(function(x){return '“'+x.dilemma+'” → '+x.choice;}).join('  ·  ')):'';}
+async function ask(e){e.preventDefault();var d=(el('q').value||'').trim();if(!d)return false;setBusy(true);
+ try{var res=await fetch('api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dilemma:d})});
+  if(!res.ok)throw new Error('http '+res.status);var r=await res.json();render(r);setBrain(r.brain||'claude');}
+ catch(err){render(council(d));setBrain('mock');}
+ finally{setBusy(false);}return false;}
+el('q').value=__DILEMMA__;render(council(el('q').value));            // 초기엔 네트워크 없이 샘플만 표시
+fetch('api/health').then(function(r){return r.ok?r.json():null;}).then(function(h){if(h)setBrain(h.brain);}).catch(function(){});
 </script>
 </body></html>"""
 
