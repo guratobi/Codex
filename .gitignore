@@ -6,6 +6,6 @@ venv/
 .cache/
 .DS_Store
 
-# 생성되는 대시보드 산출물 (python -m agent_team.dashboard 로 재생성)
+# 생성되는 대시보드 산출물 (python -m seowon.dashboard 로 재생성)
 *_dashboard.html
 *_dashboard.svg

@@ -1,4 +1,4 @@
-"""agent_team 프로토타입 단위 테스트 (표준 라이브러리 + MockLLM, 네트워크 없음).
+"""seowon 프로토타입 단위 테스트 (표준 라이브러리 + MockLLM, 네트워크 없음).
 
 실행:  python -m unittest discover -v
 """
@@ -6,12 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_team.agents import Planner, Reviewer, Worker, build_user_message
-from agent_team.journal import Journal, JournalEntry, derive_tags, now_iso
-from agent_team.llm import DriftingMockLLM, MockLLM, Message, get_llm
-from agent_team.team import Team
-from agent_team.drift import diagnose
-from agent_team.dashboard import build_demo_data, render_html, render_svg, write_dashboard
+from seowon.agents import Planner, Reviewer, Worker, build_user_message
+from seowon.journal import Journal, JournalEntry, derive_tags, now_iso
+from seowon.llm import DriftingMockLLM, MockLLM, Message, get_llm
+from seowon.team import Team
+from seowon.drift import diagnose
+from seowon.dashboard import build_demo_data, render_html, render_svg, write_dashboard
 
 
 def entry(task="주간 뉴스레터 작성", lesson="교훈", tags=None, agent="기획자"):

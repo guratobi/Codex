@@ -2,7 +2,7 @@
 
 외부 라이브러리/폰트/스크립트 없이 인라인 CSS 만 쓴다. 브라우저로 바로 열림.
 
-실행:  python -m agent_team.dashboard   →  agent_team_dashboard.html 생성
+실행:  python -m seowon.dashboard   →  seowon_dashboard.html 생성
 """
 from __future__ import annotations
 
@@ -172,16 +172,16 @@ def render_html(data: DashboardData) -> str:
         "<!DOCTYPE html>\n"
         '<html lang="ko"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>에이전트 팀 관제 대시보드</title><style>{_CSS}</style></head>"
+        f"<title>서원 · 관제소</title><style>{_CSS}</style></head>"
         '<body><div class="wrap"><header>'
-        "<h1>🛰 AI 에이전트 팀 — 관제 대시보드</h1>"
+        "<h1>🛰 서원(書院) · AI 에이전트 관제소</h1>"
         f'<div class="meta">작업: {_esc(data.task)} · 생성 {ts} · '
         "데이터: MockLLM(데모)</div></header>"
         f"{body}</div></body></html>"
     )
 
 
-def write_dashboard(path: str | Path = "agent_team_dashboard.html") -> Path:
+def write_dashboard(path: str | Path = "seowon_dashboard.html") -> Path:
     p = Path(path)
     p.write_text(render_html(build_demo_data()), encoding="utf-8")
     return p
@@ -207,7 +207,7 @@ def render_svg(data: DashboardData) -> str:
         f'viewBox="0 0 {W} {H}" font-family="-apple-system,Segoe UI,Roboto,sans-serif">',
         f'<rect width="{W}" height="{H}" fill="#0d1117"/>',
         '<text x="24" y="40" fill="#e6edf3" font-size="22" font-weight="700">'
-        'AI 에이전트 팀 — 관제 대시보드</text>',
+        '서원 · AI 에이전트 관제소</text>',
         f'<text x="24" y="62" fill="#7d8590" font-size="12">'
         f'작업: {_esc(data.task)} · 데모(MockLLM)</text>',
     ]
@@ -251,7 +251,7 @@ def render_svg(data: DashboardData) -> str:
     return "\n".join(p)
 
 
-def write_dashboard_svg(path: str | Path = "agent_team_dashboard.svg") -> Path:
+def write_dashboard_svg(path: str | Path = "seowon_dashboard.svg") -> Path:
     p = Path(path)
     p.write_text(render_svg(build_demo_data()), encoding="utf-8")
     return p
@@ -259,8 +259,8 @@ def write_dashboard_svg(path: str | Path = "agent_team_dashboard.svg") -> Path:
 
 if __name__ == "__main__":
     data = build_demo_data()
-    html_path = Path("agent_team_dashboard.html")
-    svg_path = Path("agent_team_dashboard.svg")
+    html_path = Path("seowon_dashboard.html")
+    svg_path = Path("seowon_dashboard.svg")
     html_path.write_text(render_html(data), encoding="utf-8")
     svg_path.write_text(render_svg(data), encoding="utf-8")
     print(f"대시보드 생성: {html_path.resolve()}")

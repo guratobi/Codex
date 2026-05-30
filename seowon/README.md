@@ -1,4 +1,15 @@
-# AI 에이전트 팀 + 자기학습 일지 (프로토타입)
+# 서원 (Seowon) 書院
+
+> 경험을 지혜로 쌓는 AI 에이전트 팀 — 함께 일하고, 일기로 배우고, 사람이 결정한다.
+
+조선의 **서원(書院)** 에서 이름을 땄습니다. 선비들이 모여 함께 공부하고, 기록을 남겨 지혜를 쌓고, 스승이 최종 판단을 내리던 곳 — 이 프로젝트의 구조와 닮았습니다.
+
+| 옛 서원 | 이 프로젝트 |
+|---|---|
+| 선비 (역할 분담) | 기획자·실행가·검토자 에이전트 |
+| 장서·기록 | 공용 자기학습 일지 |
+| 스승의 결정 | 사람 결정 게이트 |
+| 흐트러진 선비 점검 | 드리프트(이탈) 진단 |
 
 유튜브 영상에서 본 두 아이디어를 합친 최소 구현입니다.
 
@@ -10,7 +21,7 @@
 ## 빠르게 보기
 
 ```bash
-python -m agent_team.demo
+python -m seowon.demo
 ```
 
 같은 작업을 두 번 돌립니다. **1차**엔 참고할 과거 일기가 없지만, **2차**엔 1차에서 남긴 일기를 회상해 더 많은 교훈을 적용합니다. 마지막에 누적된 지혜가 출력됩니다.
@@ -25,12 +36,14 @@ python -m agent_team.demo
 ## 구조
 
 ```
-agent_team/
-  llm.py      # LLM 추상화 + 키 없이 도는 MockLLM (+ get_llm 교체 지점)
-  journal.py  # 자기학습 일지: 기록(record)·회상(recall)·지혜(wisdom)
-  agents.py   # 기획자/실행가/검토자 역할 에이전트
-  team.py     # 오케스트레이션 + 결과 렌더링 + 사람 결정 게이트
-  demo.py     # 학습 루프 데모
+seowon/
+  llm.py        # LLM 추상화 + 키 없이 도는 MockLLM (+ get_llm 교체 지점)
+  journal.py    # 자기학습 일지: 기록(record)·회상(recall)·지혜(wisdom)
+  agents.py     # 기획자/실행가/검토자 역할 에이전트
+  team.py       # 오케스트레이션 + 결과 렌더링 + 사람 결정 게이트
+  drift.py      # 드리프트(이탈) 진단 0~100
+  dashboard.py  # HTML/SVG 관제 대시보드
+  demo.py       # 학습 루프 데모
 ```
 
 핵심 흐름:
@@ -66,7 +79,7 @@ agent_team/
 위 내용을 자기완결 HTML/SVG 한 장으로 그립니다(외부 라이브러리 없음).
 
 ```bash
-python -m agent_team.dashboard   # agent_team_dashboard.{html,svg} 생성
+python -m seowon.dashboard   # seowon_dashboard.{html,svg} 생성
 ```
 
 - HTML — 팀 파이프라인 · 지혜 누적 막대 · 드리프트 미터 · 사람 결정 대기열 · 공용 일지

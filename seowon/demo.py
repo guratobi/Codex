@@ -3,7 +3,7 @@
 같은 작업을 두 번 돌린다. 1차엔 참고할 과거 일기가 없지만, 2차엔 1차에서 남긴
 일기를 회상해 더 많은 교훈을 적용한다 → '스스로 지혜를 쌓는' 흐름을 눈으로 확인.
 
-실행:  python -m agent_team.demo
+실행:  python -m seowon.demo
 """
 from __future__ import annotations
 
