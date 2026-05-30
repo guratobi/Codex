@@ -21,6 +21,7 @@
   NAVI_CHAT_TTL_HOURS 이보다 오래된 텔레그램 채팅 메시지를 자동 삭제(시간). 0=끔,
                       최대 47 (텔레그램이 48시간 지난 메시지 삭제를 막음). 기본 12
   NAVI_ARRIVE_COOLDOWN_MIN  같은 장소 도착 알림을 이 분(min) 안엔 한 번만 (기본 10)
+  NAVI_WHITEY_HOST    흰둥이(회사 노트북)의 Tailscale 주소. 켜지면 회사 목록 푸시. 미설정 시 끔
 """
 from __future__ import annotations
 
@@ -67,6 +68,7 @@ PUSH_HOME = os.environ.get("NAVI_PUSH_HOME", "19:00")
 GIT_ON = os.environ.get("NAVI_GIT", "on").lower() != "off"
 WEBHOOK_PORT = os.environ.get("NAVI_WEBHOOK_PORT", "").strip()
 WEBHOOK_SECRET = os.environ.get("NAVI_WEBHOOK_SECRET", "").strip()
+WHITEY_HOST = os.environ.get("NAVI_WHITEY_HOST", "").strip()
 try:
     CHAT_TTL_HOURS = max(0, min(47, int(os.environ.get("NAVI_CHAT_TTL_HOURS", "12"))))
 except ValueError:
@@ -608,6 +610,53 @@ def start_webhook() -> None:
     print(f"[info] 도착 웹훅 :{WEBHOOK_PORT} 대기 중")
 
 
+# --- 흰둥이(회사 노트북) 켜짐 감지 ------------------------------------------
+_whitey_up = None         # 직전 온라인 상태 (None=아직 모름)
+_whitey_last_check = 0.0
+
+
+def whitey_online() -> "bool | None":
+    """흰둥이가 tailnet 에 온라인인지 tailscale 로 확인. 못 알아내면 None."""
+    if not WHITEY_HOST:
+        return None
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"],
+                           capture_output=True, timeout=8, text=True)
+        if r.returncode != 0:
+            return None
+        data = json.loads(r.stdout or "{}")
+    except Exception:
+        return None
+    target = WHITEY_HOST.lower()
+    for peer in (data.get("Peer") or {}).values():
+        ips = [ip.lower() for ip in (peer.get("TailscaleIPs") or [])]
+        host = (peer.get("HostName") or "").lower()
+        dns = (peer.get("DNSName") or "").lower()
+        if target in ips or target == host or dns.startswith(target + "."):
+            return bool(peer.get("Online"))
+    return None
+
+
+def check_whitey() -> None:
+    """흰둥이가 방금 켜졌으면(오프→온) 회사 목록을 푸시. 60초마다 확인."""
+    global _whitey_up, _whitey_last_check
+    if not WHITEY_HOST:
+        return
+    now = time.time()
+    if now - _whitey_last_check < 60:
+        return
+    _whitey_last_check = now
+    up = whitey_online()
+    if up is None:                  # 판단 불가 → 그대로 둠
+        return
+    if _whitey_up is None:          # 첫 확인은 기준만 (나비 재시작 헛알림 방지)
+        _whitey_up = up
+        return
+    if up and not _whitey_up and arrive_allowed("work"):
+        send(render_list("work", include_shared=True))
+    _whitey_up = up
+
+
 # --- 메인 ------------------------------------------------------------------
 def main() -> None:
     if not TOKEN:
@@ -632,6 +681,7 @@ def main() -> None:
                 print(f"[warn] handle_update 실패: {exc}", file=sys.stderr)
         maybe_push()
         cleanup_chat()
+        check_whitey()
 
 
 if __name__ == "__main__":
