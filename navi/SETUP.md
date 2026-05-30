@@ -47,8 +47,7 @@ nano navi.env
 
 ## 5. 처음 켜보기 (테스트)
 ```bash
-set -a && source navi.env && set +a
-python3 navi.py
+python3 navi.py        # navi.env 를 자동으로 읽어옴 (윈도우면: python navi.py)
 ```
 텔레그램에서 그 봇한테 `/start` 보내기 → 나비가 너를 주인으로 등록.
 아무 줄이나 던져보고(`회사: 테스트`), `목록`, `끝 <id>` 까지 돌아가면 성공. `Ctrl+C` 로 멈춤.
