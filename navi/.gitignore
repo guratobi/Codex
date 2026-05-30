@@ -1,0 +1,4 @@
+# 실제 설정/상태/로컬 brain 은 올리지 않는다
+navi.env
+.navi/
+brain/
