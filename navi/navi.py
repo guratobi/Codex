@@ -13,8 +13,8 @@
   TELEGRAM_CHAT_ID    비워두면 봇에게 처음 말 건 사람을 '주인'으로 기억한다
   NAVI_BRAIN_DIR      brain 폴더 경로 (기본: ~/navi-brain)
   NAVI_STATE_DIR      상태 파일 폴더 (기본: ~/.navi, brain 과 분리 — 깃에 안 올라감)
-  NAVI_PUSH_WORK      회사 목록 푸시 시각 HH:MM (기본 08:50, 평일만)
-  NAVI_PUSH_HOME      집 목록 푸시 시각 HH:MM (기본 19:00, 매일)
+  NAVI_PUSH_WORK      회사 목록 푸시 시각 HH:MM (기본 08:50, 평일만). "off" 면 끔
+  NAVI_PUSH_HOME      집 목록 푸시 시각 HH:MM (기본 19:00, 매일). "off" 면 끔
   NAVI_GIT            "off" 면 깃 커밋/푸시 끔 (기본 on, brain 이 깃 레포일 때만 동작)
   NAVI_WEBHOOK_PORT   GPS 도착 푸시용 포트 (설정하면 활성화, 미설정 시 끔)
   NAVI_WEBHOOK_SECRET 웹훅 보호용 키 (포트 켤 거면 반드시 설정)
@@ -480,20 +480,26 @@ def handle_update(u: dict) -> None:
 
 
 # --- 시간대 푸시 ------------------------------------------------------------
+def _time_on(val: str) -> bool:
+    """푸시 시각 설정이 켜져 있나. off/none/-/빈값이면 끔(도착 트리거만 쓸 때)."""
+    return bool(val) and val.strip().lower() not in ("off", "none", "-")
+
+
 def maybe_push() -> None:
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
     hhmm = now.strftime("%H:%M")
 
-    # 회사: 평일(월~금)만
-    if now.weekday() < 5 and hhmm >= PUSH_WORK and state.get("push_work") != today:
+    # 회사: 평일(월~금)만 — 시각이 켜져 있을 때만
+    if _time_on(PUSH_WORK) and now.weekday() < 5 and hhmm >= PUSH_WORK \
+            and state.get("push_work") != today:
         state["push_work"] = today
         save_state()
         if active_items("work") or active_items("both"):
             send(render_list("work", include_shared=True))
 
-    # 집: 매일
-    if hhmm >= PUSH_HOME and state.get("push_home") != today:
+    # 집: 매일 — 시각이 켜져 있을 때만
+    if _time_on(PUSH_HOME) and hhmm >= PUSH_HOME and state.get("push_home") != today:
         state["push_home"] = today
         save_state()
         if active_items("home") or active_items("both"):
