@@ -1,6 +1,6 @@
 """나비 — 항상 켜져 있는 개인 비서 에이전트.
 
-텔레그램으로 한 줄 던지면 '집/회사'로 분류해 기억해 두고,
+텔레그램으로 한 줄 던지면 '집/회사/양쪽'으로 분류해 기억해 두고,
 정해진 시각(출근/퇴근 즈음)에 그 장소의 할 일을 먼저 알려준다.
 끝낸 일은 시각과 함께 done 으로 옮기고, 모든 변화는 깃 + log.jsonl 에 장부로 남는다.
 
@@ -58,8 +58,8 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 STATE_PATH = STATE_DIR / "state.json"
 ABOUT_PATH = Path(__file__).resolve().parent / "ABOUT.md"
 
-EMOJI = {"home": "🏠", "work": "🏢"}
-NAME = {"home": "집", "work": "회사"}
+EMOJI = {"home": "🏠", "work": "🏢", "both": "🔁"}
+NAME = {"home": "집", "work": "회사", "both": "양쪽"}
 
 # 분류 키워드. '이직/이력서/면접'류는 일부러 집(개인) 쪽에 둔다 —
 # 회사 노트북 화면(SessionStart 훅)에 절대 안 뜨게 하려는 의도.
@@ -79,9 +79,10 @@ HELP = (
     "• 그냥 한 줄 던져 → 집/회사 자동 분류 (애매하면 내가 되물어봄)\n"
     "• 집: 빨래 돌리기      ← 집 일로 바로 추가\n"
     "• 회사: KPI 경로 확정  ← 회사 일로 바로 추가\n"
-    "• 집  /  회사          ← 그 목록 보기\n"
+    "• 양쪽: 여권 챙기기    ← 집·회사 양쪽에 다 뜨게\n"
+    "• 집 / 회사 / 양쪽     ← 그 목록 보기\n"
     "• 끝 a1b2             ← 그 일 완료 (id는 목록에 떠 있어)\n"
-    "• 목록                ← 집·회사 전체 보기\n"
+    "• 목록                ← 집·회사·양쪽 전체 보기\n"
     "• 인박스              ← 분류 대기 중인 거\n"
     "\n"
     "정해둔 시각엔 내가 먼저 그날 목록을 보내줄게."
@@ -199,7 +200,7 @@ def path_for(place: str) -> Path:
 def ensure_brain() -> None:
     BRAIN_DIR.mkdir(parents=True, exist_ok=True)
     titles = {"inbox": "📥 인박스 (분류 대기)", "home": "🏠 집", "work": "🏢 회사",
-              "done": "✅ 끝낸 일"}
+              "both": "🔁 양쪽(집·회사 공통)", "done": "✅ 끝낸 일"}
     for place, title in titles.items():
         p = BRAIN_DIR / f"{place}.md"
         if not p.exists():
@@ -254,12 +255,22 @@ def git_sync(message: str) -> None:
 
 
 # --- 동작 ------------------------------------------------------------------
+def token_place(tok: str) -> str | None:
+    tok = tok.lower()
+    if tok in ("집", "home"):
+        return "home"
+    if tok in ("회사", "work"):
+        return "work"
+    if tok in ("양쪽", "공통", "둘다", "both"):
+        return "both"
+    return None
+
+
 def classify(text: str) -> str | None:
     low = text.lower()
-    if re.match(r"\s*(회사|work)\s*[:：]", low):
-        return "work"
-    if re.match(r"\s*(집|home)\s*[:：]", low):
-        return "home"
+    m = re.match(r"\s*(집|회사|양쪽|공통|둘다|home|work|both)\s*[:：]", low)
+    if m:
+        return token_place(m.group(1))
     work = any(k in low for k in WORK_KW)
     home = any(k in low for k in HOME_KW)
     if work and not home:
@@ -288,7 +299,7 @@ def add_inbox(text: str) -> str:
 
 
 def assign(iid: str, place: str) -> None:
-    """인박스 항목을 집/회사로 이동."""
+    """인박스 항목을 집/회사/양쪽으로 이동."""
     lines = path_for("inbox").read_text("utf-8").splitlines()
     kept, moved_text = [], None
     for line in lines:
@@ -312,7 +323,7 @@ def assign(iid: str, place: str) -> None:
 
 
 def complete(iid: str) -> None:
-    for place in ("home", "work"):
+    for place in ("home", "work", "both"):
         lines = path_for(place).read_text("utf-8").splitlines()
         kept, done_text = [], None
         for line in lines:
@@ -333,13 +344,18 @@ def complete(iid: str) -> None:
     send(f"({iid}) 못 찾았어. '목록'으로 id 확인해봐.")
 
 
-def render_list(place: str) -> str:
-    items = active_items(place)
-    head = f"{EMOJI[place]} {NAME[place]} 할 일 ({len(items)})"
-    if not items:
+def render_list(place: str, include_shared: bool = False) -> str:
+    own = active_items(place)
+    shared = active_items("both") if include_shared and place in ("home", "work") else []
+    total = len(own) + len(shared)
+    head = f"{EMOJI[place]} {NAME[place]} 할 일 ({total})"
+    if total == 0:
         return head + "\n• (없음)"
-    lines = [head] + [f"• ({it['id']}) {it['text']}" for it in items]
-    lines.append(f"— 끝내려면: 끝 {items[0]['id']}")
+    lines = [head]
+    lines += [f"• ({it['id']}) {it['text']}" for it in own]
+    lines += [f"• ({it['id']}) {it['text']} 🔁" for it in shared]
+    first = (own or shared)[0]["id"]
+    lines.append(f"— 끝내려면: 끝 {first}")
     return "\n".join(lines)
 
 
@@ -347,8 +363,8 @@ def render_inbox() -> str:
     items = active_items("inbox")
     if not items:
         return "📥 인박스 비었음"
-    lines = ["📥 인박스 (집/회사 정해줘)"]
-    lines += [f"• ({it['id']}) {it['text']}  → 집 {it['id']} / 회사 {it['id']}"
+    lines = ["📥 인박스 (집/회사/양쪽 정해줘)"]
+    lines += [f"• ({it['id']}) {it['text']}  → 집 {it['id']} / 회사 {it['id']} / 양쪽 {it['id']}"
               for it in items]
     return "\n".join(lines)
 
@@ -373,40 +389,43 @@ def handle_text(text: str) -> None:
         send("완료는 '끝 a1b2' 처럼 4자리 id로. (id는 목록에 떠 있어)")
         return
 
-    # 전체/인박스 목록
+    # 전체 목록 (각 칸 따로 — 양쪽 항목은 중복 없이 한 번만)
     if low in ("/list", "목록", "전체", "all"):
-        send(render_list("work") + "\n\n" + render_list("home"))
+        blocks = [render_list("work"), render_list("home")]
+        if active_items("both"):
+            blocks.append(render_list("both"))
+        send("\n\n".join(blocks))
         return
     if low in ("/inbox", "인박스"):
         send(render_inbox())
         return
 
-    # 집/회사 단독 → pending 있으면 분류, 없으면 목록
+    # 집/회사/양쪽 단독 → pending 있으면 분류, 없으면 목록
+    single = None
     if low in ("집", "home", "/home", "🏠"):
+        single = "home"
+    elif low in ("회사", "work", "/work", "🏢"):
+        single = "work"
+    elif low in ("양쪽", "공통", "둘다", "both", "/both", "🔁"):
+        single = "both"
+    if single:
         if state.get("pending"):
-            assign(state["pending"], "home")
+            assign(state["pending"], single)
         else:
-            send(render_list("home"))
-        return
-    if low in ("회사", "work", "/work", "🏢"):
-        if state.get("pending"):
-            assign(state["pending"], "work")
-        else:
-            send(render_list("work"))
+            send(render_list(single, include_shared=single in ("home", "work")))
         return
 
-    # "집 a1b2" / "회사 a1b2" → 인박스 항목 분류
-    m = re.match(r"(집|회사|home|work)\s+([0-9a-f]{4})\b", low)
+    # "집 a1b2" / "회사 a1b2" / "양쪽 a1b2" → 인박스 항목 분류
+    m = re.match(r"(집|회사|양쪽|공통|둘다|home|work|both)\s+([0-9a-f]{4})\b", low)
     if m:
-        place = "home" if m.group(1) in ("집", "home") else "work"
-        assign(m.group(2), place)
+        assign(m.group(2), token_place(m.group(1)))
         return
 
-    # 명시적 추가 "집: ...", "회사: ..."
-    m = re.match(r"\s*(집|회사|home|work)\s*[:：]\s*(.+)", t, re.IGNORECASE)
+    # 명시적 추가 "집: ...", "회사: ...", "양쪽: ..."
+    m = re.match(r"\s*(집|회사|양쪽|공통|둘다|home|work|both)\s*[:：]\s*(.+)", t,
+                 re.IGNORECASE)
     if m:
-        place = "home" if m.group(1).lower() in ("집", "home") else "work"
-        add_item(place, m.group(2).strip())
+        add_item(token_place(m.group(1)), m.group(2).strip())
         return
 
     # 일반 문장 → 자동 분류
@@ -419,7 +438,7 @@ def handle_text(text: str) -> None:
     iid = add_inbox(t)
     state["pending"] = iid
     save_state()
-    send(f"📥 받았어: “{t}”\n집이야 회사야? (집 / 회사 로 답해줘)")
+    send(f"📥 받았어: “{t}”\n집이야 회사야, 아님 양쪽이야? (집 / 회사 / 양쪽)")
 
 
 def handle_update(u: dict) -> None:
@@ -453,15 +472,15 @@ def maybe_push() -> None:
     if now.weekday() < 5 and hhmm >= PUSH_WORK and state.get("push_work") != today:
         state["push_work"] = today
         save_state()
-        if active_items("work"):
-            send(render_list("work"))
+        if active_items("work") or active_items("both"):
+            send(render_list("work", include_shared=True))
 
     # 집: 매일
     if hhmm >= PUSH_HOME and state.get("push_home") != today:
         state["push_home"] = today
         save_state()
-        if active_items("home"):
-            send(render_list("home"))
+        if active_items("home") or active_items("both"):
+            send(render_list("home", include_shared=True))
 
 
 # --- 자기소개 공지 / 채팅 청소 ---------------------------------------------
@@ -523,7 +542,7 @@ class ArriveHandler(BaseHTTPRequestHandler):
             return
         raw = q.get("place", ["home"])[0]
         place = "work" if raw in ("work", "회사") else "home"
-        send(render_list(place))
+        send(render_list(place, include_shared=True))
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ok")
